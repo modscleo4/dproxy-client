@@ -11,6 +11,7 @@ using System.Runtime.ConstrainedExecution;
 using System.Runtime.InteropServices;
 using System.Security.Cryptography;
 using System.Text;
+using System.Threading;
 
 namespace DProxyClient
 {
@@ -287,34 +288,40 @@ namespace DProxyClient
 
                         // Wait for data to be available on any of the TCP endpoints.
                         WaitHandle.WaitAny(waitList);
-                    } catch (ObjectDisposedException) {
+                    } catch (Exception) {
                         continue;
                     }
 
                     // Read the data from the TCP endpoints and relay it to the server.
-                    foreach (var connection in Connections) {
+                    foreach (var connection in Connections.ToList()) {
                         var connectionId = connection.Key;
                         var client = connection.Value;
 
-                        while (client.Available > 0) {
-                            Console.WriteLine($"Reading {client.Available} from {client.Client.RemoteEndPoint}...");
-                            var bytesRead = await client.GetStream().ReadAsync(buffer, CancellationToken.None);
-                            if (bytesRead == 0) {
-                                break;
+                        try {
+                            while (client.Available > 0) {
+                                Console.WriteLine($"Reading {client.Available} from {client.Client.RemoteEndPoint}...");
+                                var bytesRead = await client.GetStream().ReadAsync(buffer, CancellationToken.None);
+                                if (bytesRead == 0) {
+                                    break;
+                                }
+
+                                // Encrypt the data with the shared secret.
+                                var iv = new byte[12];
+                                RandomNumberGenerator.Fill(iv);
+                                var cipherText = new byte[bytesRead];
+                                var authTag = new byte[16];
+                                cipher.Encrypt(iv, buffer.AsSpan(0, bytesRead), cipherText, authTag);
+
+                                // Send the data to the server.
+                                Console.WriteLine($"Sending {bytesRead} bytes of data to the server.");
+                                await SendData(stream, connectionId, iv, cipherText, authTag);
                             }
-
-                            // Encrypt the data with the shared secret.
-                            var iv = new byte[12];
-                            RandomNumberGenerator.Fill(iv);
-                            var cipherText = new byte[bytesRead];
-                            var authTag = new byte[16];
-                            cipher.Encrypt(iv, buffer.AsSpan(0, bytesRead), cipherText, authTag);
-
-                            // Send the data to the server.
-                            Console.WriteLine($"Sending {bytesRead} bytes of data to the server.");
-                            await SendData(stream, connectionId, iv, cipherText, authTag);
+                        } catch (ObjectDisposedException) {
+                            continue;
                         }
                     }
+
+                    GC.Collect();
                 }
             } catch (Exception e) {
                 Console.WriteLine($"Failed to read data from the TCP endpoints: {e.Message}");
@@ -322,6 +329,14 @@ namespace DProxyClient
                 // Close all the TCP connections when the thread is terminated.
                 foreach (var connection in Connections) {
                     connection.Value.Close();
+
+                    try {
+                        if (stream.CanWrite) {
+                            await SendDisconnected(stream, connection.Key);
+                        }
+                    } catch (IOException e) {
+                        Console.WriteLine($"Failed to send a disconnect message to the server: {e.Message}");
+                    }
                 }
 
                 Connections.Clear();
@@ -338,6 +353,7 @@ namespace DProxyClient
         static async Task<bool> StartSocket(string serverHost, ECDiffieHellman serverKey, ECDiffieHellman clientKey)
         {
             var socket = new TcpClient();
+            Thread? thread = null;
 
             foreach (var connection in Connections) {
                 connection.Value.Close();
@@ -390,7 +406,7 @@ namespace DProxyClient
                 Console.WriteLine("The handshake was successful.");
 
                 // Start a separate thread to read data from the TCP endpoints.
-                var thread = new Thread(async () => await ReadSockets(cipher, stream));
+                thread = new Thread(async () => await ReadSockets(cipher, stream));
                 thread.Start();
 
                 while (true) {
@@ -473,6 +489,7 @@ namespace DProxyClient
                 }
             } finally {
                 socket.Close();
+                thread?.Interrupt();
             }
         }
 
