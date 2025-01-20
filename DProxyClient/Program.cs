@@ -316,7 +316,7 @@ namespace DProxyClient
                                 Console.WriteLine($"Sending {bytesRead} bytes of data to the server.");
                                 await SendData(stream, connectionId, iv, cipherText, authTag);
                             }
-                        } catch (ObjectDisposedException) {
+                        } catch (Exception) {
                             continue;
                         }
                     }
@@ -324,7 +324,7 @@ namespace DProxyClient
                     GC.Collect();
                 }
             } catch (Exception e) {
-                Console.WriteLine($"Failed to read data from the TCP endpoints: {e.Message}");
+                Console.WriteLine($"Failed to read data from the TCP endpoints: {e.GetType().Name} - {e.Message}");
             } finally {
                 // Close all the TCP connections when the thread is terminated.
                 foreach (var connection in Connections) {
@@ -335,7 +335,7 @@ namespace DProxyClient
                             await SendDisconnected(stream, connection.Key);
                         }
                     } catch (IOException e) {
-                        Console.WriteLine($"Failed to send a disconnect message to the server: {e.Message}");
+                        Console.WriteLine($"Failed to send a disconnect message to the server: {e.GetType().Name} - {e.Message}");
                     }
                 }
 
@@ -356,6 +356,7 @@ namespace DProxyClient
             Thread? thread = null;
 
             foreach (var connection in Connections) {
+                Console.WriteLine($"Closing connection {connection.Key}...");
                 connection.Value.Close();
             }
 
@@ -430,7 +431,7 @@ namespace DProxyClient
                                 await SendConnected(stream, connect.ConnectionId);
                                 ev.Set();
                             } catch (SocketException e) {
-                                Console.WriteLine($"Failed to connect to {connect.Destination}:{connect.Port}: {e.Message}");
+                                Console.WriteLine($"Failed to connect to {connect.Destination}:{connect.Port}: {e.GetType().Name} - {e.Message}");
                                 await SendError(stream, DProxyError.CONNECTION_FAILED);
                             }
 
@@ -462,10 +463,10 @@ namespace DProxyClient
                                     // Send the data to the TCP endpoint.
                                     await client.GetStream().WriteAsync(buffer.AsMemory(0, data.Ciphertext.Length));
                                 } catch (SocketException e) {
-                                    Console.WriteLine($"Failed to relay data to the TCP endpoint: {e.Message}");
+                                    Console.WriteLine($"Failed to relay data to the TCP endpoint: {e.GetType().Name} - {e.Message}");
                                     await SendError(stream, DProxyError.CONNECTION_FAILED);
                                 } catch (IOException e) {
-                                    Console.WriteLine($"Failed to relay data to the TCP endpoint: {e.Message}");
+                                    Console.WriteLine($"Failed to relay data to the TCP endpoint: {e.GetType().Name} - {e.Message}");
                                     await SendError(stream, DProxyError.CONNECTION_CLOSED);
                                 }
                             } else {
@@ -527,11 +528,11 @@ namespace DProxyClient
                             break;
                         }
                     } catch (SocketException e) {
-                        Console.WriteLine($"Failed to connect to the DProxy Server: {e.Message}");
+                        Console.WriteLine($"Failed to connect to the DProxy Server: {e.GetType().Name} - {e.Message}");
 
                         await Task.Delay(5000);
                     } catch (IOException e) {
-                        Console.WriteLine($"Failed to send data to the DProxy Server: {e.Message}");
+                        Console.WriteLine($"Failed to send data to the DProxy Server: {e.GetType().Name} - {e.Message}");
 
                         await Task.Delay(5000);
                     }
