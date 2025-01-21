@@ -274,13 +274,13 @@ namespace DProxyClient
 
             try {
                 while (true) {
-                    if (Connections.Count == 0) {
-                        ev.WaitOne();
-                    }
-
-                    ev.Reset();
-
                     try {
+                        if (Connections.Count == 0) {
+                            ev.WaitOne();
+                        }
+
+                        ev.Reset();
+
                         var waitList = new WaitHandle[Connections.Count];
                         for (var i = 0; i < Connections.Count; i++) {
                             waitList[i] = Connections.Values.ElementAt(i).GetStream().BeginRead(buffer, 0, 0, null, null).AsyncWaitHandle;
@@ -288,16 +288,12 @@ namespace DProxyClient
 
                         // Wait for data to be available on any of the TCP endpoints.
                         WaitHandle.WaitAny(waitList);
-                    } catch (Exception) {
-                        continue;
-                    }
 
-                    // Read the data from the TCP endpoints and relay it to the server.
-                    foreach (var connection in Connections.ToList()) {
-                        var connectionId = connection.Key;
-                        var client = connection.Value;
+                        // Read the data from the TCP endpoints and relay it to the server.
+                        foreach (var connection in Connections) {
+                            var connectionId = connection.Key;
+                            var client = connection.Value;
 
-                        try {
                             while (client.Available > 0) {
                                 Console.WriteLine($"Reading {client.Available} from {client.Client.RemoteEndPoint}...");
                                 var bytesRead = await client.GetStream().ReadAsync(buffer, CancellationToken.None);
@@ -316,15 +312,13 @@ namespace DProxyClient
                                 Console.WriteLine($"Sending {bytesRead} bytes of data to the server.");
                                 await SendData(stream, connectionId, iv, cipherText, authTag);
                             }
-                        } catch (Exception) {
-                            continue;
                         }
+                    } catch (Exception e) {
+                        Console.WriteLine($"Failed to read data from the TCP endpoints: {e.GetType().Name} - {e.Message}");
                     }
 
                     GC.Collect();
                 }
-            } catch (Exception e) {
-                Console.WriteLine($"Failed to read data from the TCP endpoints: {e.GetType().Name} - {e.Message}");
             } finally {
                 // Close all the TCP connections when the thread is terminated.
                 foreach (var connection in Connections) {
@@ -335,6 +329,8 @@ namespace DProxyClient
                             await SendDisconnected(stream, connection.Key);
                         }
                     } catch (IOException e) {
+                        Console.WriteLine($"Failed to send a disconnect message to the server: {e.GetType().Name} - {e.Message}");
+                    } catch (SocketException e) {
                         Console.WriteLine($"Failed to send a disconnect message to the server: {e.GetType().Name} - {e.Message}");
                     }
                 }
@@ -440,6 +436,7 @@ namespace DProxyClient
 
                         case DProxyPacketType.DISCONNECT: {
                             var disconnect = await ReadDisconnect(stream, incomingHeader);
+
                             if (Connections.TryGetValue(disconnect.ConnectionId, out var client)) {
                                 Console.WriteLine($"Disconnecting from {client.Client.RemoteEndPoint}...");
                                 client.Close();
@@ -454,6 +451,7 @@ namespace DProxyClient
 
                         case DProxyPacketType.DATA: {
                             var data = await ReadData(stream, incomingHeader);
+
                             if (Connections.TryGetValue(data.ConnectionId, out var client)) {
                                 try {
                                     // Decrypt the data with the shared secret.
