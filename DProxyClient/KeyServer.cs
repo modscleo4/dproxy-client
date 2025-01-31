@@ -10,10 +10,12 @@ namespace DProxyClient
 {
     class KeyServer
     {
+        public static readonly string KeyExchangeServer = "http://localhost:8080";
+
         public static async Task<ECDiffieHellman> GetServerPublicKeyFromExchangeServer()
         {
             var http = new HttpClient();
-            var res = await http.GetAsync("http://localhost:8080/key-exchange");
+            var res = await http.GetAsync($"{KeyExchangeServer}/key-exchange");
             if (!res.IsSuccessStatusCode) {
                 throw new Exception($"Failed to fetch the server's public key from the Key Exchange Server: {res.Content}.");
             }
@@ -33,7 +35,7 @@ namespace DProxyClient
             http.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", token);
             var content = new StringContent(clientPublicKey, Encoding.UTF8, "application/x-pem-file");
 
-            var res = await http.PostAsync("http://localhost:8080/key-exchange", content);
+            var res = await http.PostAsync($"{KeyExchangeServer}/key-exchange", content);
             if (!res.IsSuccessStatusCode) {
                 throw new Exception($"Failed to send the public key to the Key Exchange Server: {res.Content}.");
             }

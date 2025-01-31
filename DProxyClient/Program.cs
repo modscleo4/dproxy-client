@@ -72,13 +72,15 @@ namespace DProxyClient
          */
         static readonly Dictionary<uint, TcpClient> Connections = [];
 
-        static byte[] SerializeHeader(DProxyHeader header)
+        static byte[] SerializePacket(DProxyHeader header, byte[] data)
         {
-            var buffer = new byte[5];
+            var buffer = new byte[5 + data.Length];
             buffer[0] = header.Version;
             buffer[1] = (byte)header.Type;
             BinaryPrimitives.WriteUInt16BigEndian(buffer.AsSpan(2, 2), header.Length);
             buffer[4] = (byte)header.ErrorCode;
+
+            data.CopyTo(buffer.AsSpan(5, data.Length));
 
             return buffer;
         }
@@ -91,8 +93,7 @@ namespace DProxyClient
             BinaryPrimitives.WriteUInt16BigEndian(buffer.AsSpan(0, 2), (ushort)packet.DERPublicKey.Length);
             packet.DERPublicKey.CopyTo(buffer.AsSpan(2, packet.DERPublicKey.Length));
 
-            await stream.WriteAsync(SerializeHeader(packet), CancellationToken.None);
-            await stream.WriteAsync(buffer, CancellationToken.None);
+            await stream.WriteAsync(SerializePacket(packet, buffer), CancellationToken.None);
         }
 
         static async Task<DProxyHeader> GetPacketHeader(NetworkStream stream, bool wait = true)
@@ -106,7 +107,7 @@ namespace DProxyClient
             }
 
             var headerBuffer = new byte[5];
-            var len = await stream.ReadAsync(headerBuffer, CancellationToken.None);
+            await stream.ReadExactlyAsync(headerBuffer, CancellationToken.None);
 
             return new DProxyHeader(headerBuffer[0], (DProxyPacketType)headerBuffer[1], BinaryPrimitives.ReadUInt16BigEndian(headerBuffer.AsSpan(2, 2)), (DProxyError)headerBuffer[4]);
         }
@@ -114,17 +115,17 @@ namespace DProxyClient
         static async Task<DProxyHandshakeResponse> ReadHandshakeResponse(NetworkStream stream, DProxyHeader header)
         {
             var iv = new byte[12];
-            await stream.ReadAsync(iv, CancellationToken.None);
+            await stream.ReadExactlyAsync(iv, CancellationToken.None);
 
             var ciphertextLengthBuffer = new byte[2];
-            await stream.ReadAsync(ciphertextLengthBuffer, CancellationToken.None);
+            await stream.ReadExactlyAsync(ciphertextLengthBuffer, CancellationToken.None);
             var ciphertextLength = BinaryPrimitives.ReadUInt16BigEndian(ciphertextLengthBuffer);
 
             var ciphertext = new byte[ciphertextLength];
-            await stream.ReadAsync(ciphertext, CancellationToken.None);
+            await stream.ReadExactlyAsync(ciphertext, CancellationToken.None);
 
             var authenticationTag = new byte[16];
-            await stream.ReadAsync(authenticationTag, CancellationToken.None);
+            await stream.ReadExactlyAsync(authenticationTag, CancellationToken.None);
 
             return new DProxyHandshakeResponse(iv, ciphertext, authenticationTag);
         }
@@ -136,25 +137,24 @@ namespace DProxyClient
             BinaryPrimitives.WriteUInt16BigEndian(buffer.AsSpan(0, 2), (ushort)packet.Plaintext.Length);
             packet.Plaintext.CopyTo(buffer.AsSpan(2, packet.Plaintext.Length));
 
-            await stream.WriteAsync(SerializeHeader(packet), CancellationToken.None);
-            await stream.WriteAsync(buffer, CancellationToken.None);
+            await stream.WriteAsync(SerializePacket(packet, buffer), CancellationToken.None);
         }
 
         static async Task<DProxyConnect> ReadConnect(NetworkStream stream, DProxyHeader header)
         {
             var connectionIdBuffer = new byte[4];
-            await stream.ReadAsync(connectionIdBuffer, CancellationToken.None);
+            await stream.ReadExactlyAsync(connectionIdBuffer, CancellationToken.None);
             var connectionId = BinaryPrimitives.ReadUInt32BigEndian(connectionIdBuffer);
 
             var destinationLengthBuffer = new byte[2];
-            await stream.ReadAsync(destinationLengthBuffer, CancellationToken.None);
+            await stream.ReadExactlyAsync(destinationLengthBuffer, CancellationToken.None);
             var destinationLength = BinaryPrimitives.ReadUInt16BigEndian(destinationLengthBuffer);
 
             var destination = new byte[destinationLength];
-            await stream.ReadAsync(destination, CancellationToken.None);
+            await stream.ReadExactlyAsync(destination, CancellationToken.None);
 
             var portBuffer = new byte[2];
-            await stream.ReadAsync(portBuffer, CancellationToken.None);
+            await stream.ReadExactlyAsync(portBuffer, CancellationToken.None);
             var port = BinaryPrimitives.ReadUInt16BigEndian(portBuffer);
 
             return new DProxyConnect(connectionId, Encoding.UTF8.GetString(destination), port);
@@ -166,14 +166,13 @@ namespace DProxyClient
             var buffer = new byte[packet.Length];
             BinaryPrimitives.WriteUInt32BigEndian(buffer.AsSpan(0, 4), packet.ConnectionId);
 
-            await stream.WriteAsync(SerializeHeader(packet), CancellationToken.None);
-            await stream.WriteAsync(buffer, CancellationToken.None);
+            await stream.WriteAsync(SerializePacket(packet, buffer), CancellationToken.None);
         }
 
         static async Task<DProxyDisconnect> ReadDisconnect(NetworkStream stream, DProxyHeader header)
         {
             var connectionIdBuffer = new byte[4];
-            await stream.ReadAsync(connectionIdBuffer, CancellationToken.None);
+            await stream.ReadExactlyAsync(connectionIdBuffer, CancellationToken.None);
             var connectionId = BinaryPrimitives.ReadUInt32BigEndian(connectionIdBuffer);
 
             return new DProxyDisconnect(connectionId);
@@ -185,28 +184,27 @@ namespace DProxyClient
             var buffer = new byte[packet.Length];
             BinaryPrimitives.WriteUInt32BigEndian(buffer.AsSpan(0, 4), packet.ConnectionId);
 
-            await stream.WriteAsync(SerializeHeader(packet), CancellationToken.None);
-            await stream.WriteAsync(buffer, CancellationToken.None);
+            await stream.WriteAsync(SerializePacket(packet, buffer), CancellationToken.None);
         }
 
         static async Task<DProxyData> ReadData(NetworkStream stream, DProxyHeader header)
         {
             var connectionIdBuffer = new byte[4];
-            await stream.ReadAsync(connectionIdBuffer, CancellationToken.None);
+            await stream.ReadExactlyAsync(connectionIdBuffer, CancellationToken.None);
             var connectionId = BinaryPrimitives.ReadUInt32BigEndian(connectionIdBuffer);
 
             var iv = new byte[12];
-            await stream.ReadAsync(iv, CancellationToken.None);
+            await stream.ReadExactlyAsync(iv, CancellationToken.None);
 
             var ciphertextLengthBuffer = new byte[2];
-            await stream.ReadAsync(ciphertextLengthBuffer, CancellationToken.None);
+            await stream.ReadExactlyAsync(ciphertextLengthBuffer, CancellationToken.None);
             var ciphertextLength = BinaryPrimitives.ReadUInt16BigEndian(ciphertextLengthBuffer);
 
             var ciphertext = new byte[ciphertextLength];
-            await stream.ReadAsync(ciphertext, CancellationToken.None);
+            await stream.ReadExactlyAsync(ciphertext, CancellationToken.None);
 
             var authenticationTag = new byte[16];
-            await stream.ReadAsync(authenticationTag, CancellationToken.None);
+            await stream.ReadExactlyAsync(authenticationTag, CancellationToken.None);
 
             return new DProxyData(connectionId, iv, ciphertext, authenticationTag);
         }
@@ -221,17 +219,33 @@ namespace DProxyClient
             ciphertext.CopyTo(buffer.AsSpan(18, packet.Ciphertext.Length));
             authenticationTag.CopyTo(buffer.AsSpan(18 + packet.Ciphertext.Length, 16));
 
-            await stream.WriteAsync(SerializeHeader(packet), CancellationToken.None);
-            await stream.WriteAsync(buffer, CancellationToken.None);
+            await stream.WriteAsync(SerializePacket(packet, buffer), CancellationToken.None);
         }
 
         static async Task<DProxyHeartbeat> ReadHeartbeat(NetworkStream stream, DProxyHeader header)
         {
             var timestampBuffer = new byte[8];
-            await stream.ReadAsync(timestampBuffer, CancellationToken.None);
+            await stream.ReadExactlyAsync(timestampBuffer, CancellationToken.None);
             var timestamp = BinaryPrimitives.ReadUInt64BigEndian(timestampBuffer);
 
             return new DProxyHeartbeat(timestamp);
+        }
+
+        static async Task SendHeartbeat(NetworkStream stream, ulong timestamp)
+        {
+            var packet = new DProxyHeartbeat(timestamp);
+            var buffer = new byte[packet.Length];
+            BinaryPrimitives.WriteUInt64BigEndian(buffer.AsSpan(0, 8), packet.Timestamp);
+
+            await stream.WriteAsync(SerializePacket(packet, buffer), CancellationToken.None);
+        }
+        static async Task<DProxyHeartbeatResponse> ReadHeartbeatResponse(NetworkStream stream, DProxyHeader header)
+        {
+            var timestampBuffer = new byte[8];
+            await stream.ReadExactlyAsync(timestampBuffer, CancellationToken.None);
+            var timestamp = BinaryPrimitives.ReadUInt64BigEndian(timestampBuffer);
+
+            return new DProxyHeartbeatResponse(timestamp);
         }
 
         static async Task SendHeartbeatResponse(NetworkStream stream, ulong timestamp)
@@ -240,8 +254,7 @@ namespace DProxyClient
             var buffer = new byte[packet.Length];
             BinaryPrimitives.WriteUInt64BigEndian(buffer.AsSpan(0, 8), packet.Timestamp);
 
-            await stream.WriteAsync(SerializeHeader(packet), CancellationToken.None);
-            await stream.WriteAsync(buffer, CancellationToken.None);
+            await stream.WriteAsync(SerializePacket(packet, buffer), CancellationToken.None);
         }
 
         static async Task SendError(NetworkStream stream, DProxyError errorCode, string message = "")
@@ -251,19 +264,18 @@ namespace DProxyClient
             BinaryPrimitives.WriteUInt16BigEndian(buffer.AsSpan(0, 2), (ushort)message.Length);
             Encoding.UTF8.GetBytes(message).CopyTo(buffer.AsSpan(2, message.Length));
 
-            await stream.WriteAsync(SerializeHeader(packet), CancellationToken.None);
-            await stream.WriteAsync(buffer, CancellationToken.None);
+            await stream.WriteAsync(SerializePacket(packet, buffer), CancellationToken.None);
         }
 
         static bool ValidateHeader(DProxyHeader header, DProxyPacketType expectedType)
         {
             if (header.Type != expectedType) {
-                Console.WriteLine($"Received an invalid packet type: {header.Type}.");
+                Console.Error.WriteLine($"Received an invalid packet type: {header.Type}.");
                 return false;
             }
 
             if (header.ErrorCode != DProxyError.NO_ERROR) {
-                Console.WriteLine($"Received an error response: {header.ErrorCode}.");
+                Console.Error.WriteLine($"Received an error response: {header.ErrorCode}.");
                 return false;
             }
 
@@ -281,7 +293,7 @@ namespace DProxyClient
                     var client = connection.Value;
 
                     while (client.Available > 0) {
-                        Console.WriteLine($"Reading {client.Available} from {client.Client.RemoteEndPoint}...");
+                        //Console.WriteLine($"Reading {client.Available} from {client.Client.RemoteEndPoint}...");
                         var bytesRead = await client.GetStream().ReadAsync(buffer, CancellationToken.None);
                         if (bytesRead == 0) {
                             break;
@@ -295,12 +307,12 @@ namespace DProxyClient
                         cipher.Encrypt(iv, buffer.AsSpan(0, bytesRead), cipherText, authTag);
 
                         // Send the data to the server.
-                        Console.WriteLine($"Sending {bytesRead} bytes of data to the server.");
+                        //Console.WriteLine($"Sending {bytesRead} bytes of data to the server.");
                         await SendData(stream, connectionId, iv, cipherText, authTag);
                     }
                 }
             } catch (Exception e) {
-                Console.WriteLine($"Failed to read data from the TCP endpoints: {e.GetType().Name} - {e.Message}");
+                Console.Error.WriteLine($"Failed to read data from the TCP endpoints: {e.GetType().Name} - {e.Message}");
             }
         }
 
@@ -377,6 +389,10 @@ namespace DProxyClient
                     };
 
                     for (var i = 0; i < Connections.Count; i++) {
+                        if (!Connections.Values.ElementAt(i).Connected) {
+                            continue;
+                        }
+
                         waitList.Add(Connections.Values.ElementAt(i).GetStream().Socket);
                     }
 
@@ -388,7 +404,7 @@ namespace DProxyClient
 
                     if (stream.Socket.Available == 0) {
                         if (waitList.Count == 1) {
-                            throw new SocketException((int)SocketError.NotConnected);
+                            await SendHeartbeat(stream, (ulong)new DateTimeOffset(DateTime.UtcNow).ToUnixTimeMilliseconds());
                         }
 
                         continue;
@@ -413,7 +429,7 @@ namespace DProxyClient
 
                                 await SendConnected(stream, connect.ConnectionId);
                             } catch (SocketException e) {
-                                Console.WriteLine($"Failed to connect to {connect.Destination}:{connect.Port}: {e.GetType().Name} - {e.Message}");
+                                Console.Error.WriteLine($"Failed to connect to {connect.Destination}:{connect.Port}: {e.GetType().Name} - {e.Message}");
                                 await SendError(stream, DProxyError.CONNECTION_FAILED);
                             }
 
@@ -446,10 +462,10 @@ namespace DProxyClient
                                     // Send the data to the TCP endpoint.
                                     await client.GetStream().WriteAsync(buffer.AsMemory(0, data.Ciphertext.Length));
                                 } catch (SocketException e) {
-                                    Console.WriteLine($"Failed to relay data to the TCP endpoint: {e.GetType().Name} - {e.Message}");
+                                    Console.Error.WriteLine($"Failed to relay data to the TCP endpoint: {e.GetType().Name} - {e.Message}");
                                     await SendError(stream, DProxyError.CONNECTION_FAILED);
                                 } catch (IOException e) {
-                                    Console.WriteLine($"Failed to relay data to the TCP endpoint: {e.GetType().Name} - {e.Message}");
+                                    Console.Error.WriteLine($"Failed to relay data to the TCP endpoint: {e.GetType().Name} - {e.Message}");
                                     await SendError(stream, DProxyError.CONNECTION_CLOSED);
                                 }
                             } else {
@@ -466,8 +482,12 @@ namespace DProxyClient
                             break;
                         }
 
+                        case DProxyPacketType.HANDSHAKE_RESPONSE:
+                            var heartbeatResponse = await ReadHeartbeatResponse(stream, incomingHeader);
+                            break;
+
                         default:
-                            Console.WriteLine($"Received an invalid packet type: {incomingHeader.Type}.");
+                            Console.Error.WriteLine($"Received an invalid packet type: {incomingHeader.Type}.");
                             continue;
                     }
                 }
@@ -481,9 +501,9 @@ namespace DProxyClient
                             await SendDisconnected(socket.GetStream(), connection.Key);
                         }
                     } catch (IOException e) {
-                        Console.WriteLine($"Failed to send a disconnect message to the server: {e.GetType().Name} - {e.Message}");
+                        Console.Error.WriteLine($"Failed to send a disconnect message to the server: {e.GetType().Name} - {e.Message}");
                     } catch (SocketException e) {
-                        Console.WriteLine($"Failed to send a disconnect message to the server: {e.GetType().Name} - {e.Message}");
+                        Console.Error.WriteLine($"Failed to send a disconnect message to the server: {e.GetType().Name} - {e.Message}");
                     }
                 }
 
@@ -513,7 +533,7 @@ namespace DProxyClient
 
                     // Send Public Key to Key Exchange Server
                     Console.WriteLine("Sending client's public key to Key Exchange Server...");
-                    await KeyServer.SendClientPublicKeyToExchangeServer(clientKey, File.ReadAllText(clientTokenPath));
+                    await KeyServer.SendClientPublicKeyToExchangeServer(clientKey, File.ReadAllText(clientTokenPath).Trim());
                 } else {
                     clientKey = GetClientKeyPair();
                 }
@@ -526,11 +546,11 @@ namespace DProxyClient
                             break;
                         }
                     } catch (SocketException e) {
-                        Console.WriteLine($"Failed to connect to the DProxy Server: {e.GetType().Name} - {e.Message}");
+                        Console.Error.WriteLine($"Failed to connect to the DProxy Server: {e.GetType().Name} - {e.Message}");
 
                         await Task.Delay(5000);
                     } catch (IOException e) {
-                        Console.WriteLine($"Failed to send data to the DProxy Server: {e.GetType().Name} - {e.Message}");
+                        Console.Error.WriteLine($"Failed to send data to the DProxy Server: {e.GetType().Name} - {e.Message}");
 
                         await Task.Delay(5000);
                     }
