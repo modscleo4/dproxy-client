@@ -368,6 +368,10 @@ namespace DProxyClient
 
                 var buffer = new byte[2 << 14];
                 while (true) {
+                    if (!stream.Socket.Connected) {
+                        throw new SocketException((int)SocketError.NotConnected);
+                    }
+
                     var waitList = new List<Socket>(Connections.Count + 1) {
                         stream.Socket
                     };
@@ -383,6 +387,10 @@ namespace DProxyClient
                     await ReadSockets(cipher, stream);
 
                     if (stream.Socket.Available == 0) {
+                        if (waitList.Count == 1) {
+                            throw new SocketException((int)SocketError.NotConnected);
+                        }
+
                         continue;
                     }
 
