@@ -461,6 +461,9 @@ namespace DProxyClient
 
                                     // Send the data to the TCP endpoint.
                                     await client.GetStream().WriteAsync(buffer.AsMemory(0, data.Ciphertext.Length));
+                                } catch (AuthenticationTagMismatchException e) {
+                                    Console.Error.WriteLine($"Failed to decrypt data from the DProxy Server: {e.GetType().Name} - {e.Message}");
+                                    throw new SocketException((int)SocketError.ConnectionReset);
                                 } catch (SocketException e) {
                                     Console.Error.WriteLine($"Failed to relay data to the TCP endpoint: {e.GetType().Name} - {e.Message}");
                                     await SendError(stream, DProxyError.CONNECTION_FAILED);
