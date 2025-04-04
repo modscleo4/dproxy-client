@@ -33,10 +33,11 @@ namespace DProxyClient
 {
     internal class Program
     {
-        static readonly string serverPublicKeyPath = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "DProxy", "ServerPublicKey.pem");
-        static readonly string clientPrivateKeyPath = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "DProxy", "ClientPrivateKey.pem");
-        static readonly string clientPublicKeyPath = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "DProxy", "ClientPublicKey.pem");
-        static readonly string clientTokenPath = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "DProxy", "Token");
+        static readonly string configPath = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "DProxy");
+        static readonly string serverPublicKeyPath = Path.Combine(configPath, "ServerPublicKey.pem");
+        static readonly string clientPrivateKeyPath = Path.Combine(configPath, "ClientPrivateKey.pem");
+        static readonly string clientPublicKeyPath = Path.Combine(configPath, "ClientPublicKey.pem");
+        static readonly string clientTokenPath = Path.Combine(configPath, "Token");
 
         /**
          * Get the server's public key from the file system.
@@ -115,7 +116,7 @@ namespace DProxyClient
         static async Task<DProxyHeader> GetPacketHeader(NetworkStream stream, bool wait = true)
         {
             if (wait) {
-                Socket.Select(new List<Socket>() { stream.Socket }, new List<Socket>(), new List<Socket>(), -1);
+                Socket.Select(new List<Socket>() { stream.Socket }, new List<Socket>(), new List<Socket>(), TimeSpan.FromSeconds(30));
             }
 
             if (!stream.Socket.Connected || !stream.DataAvailable) {
@@ -536,6 +537,10 @@ namespace DProxyClient
             try {
                 ECDiffieHellman serverKey;
                 ECDiffieHellman clientKey;
+
+                if (!File.Exists(configPath)) {
+                    Directory.CreateDirectory(configPath);
+                }
 
                 if (!File.Exists(serverPublicKeyPath)) {
                     Console.WriteLine("Fetching server's public key from Key Exchange Server...");
