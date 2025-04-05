@@ -104,7 +104,7 @@ namespace DProxyClient
                     }
                 }
             } catch (Exception e) {
-                Console.Error.WriteLine($"Failed to read data from the TCP endpoints: {e.GetType().Name} - {e.Message}");
+                Console.Error.WriteLine($"Failed to read data from the TCP endpoints: {e.GetType().Name} - {e.Message}\n{e.StackTrace}");
             }
         }
 
@@ -214,7 +214,7 @@ namespace DProxyClient
 
                                 await Client.SendConnected(stream, connect.ConnectionId);
                             } catch (SocketException e) {
-                                Console.Error.WriteLine($"Failed to connect to {connect.Destination}:{connect.Port}: {e.GetType().Name} - {e.Message}");
+                                Console.Error.WriteLine($"Failed to connect to {connect.Destination}:{connect.Port}: {e.GetType().Name} - {e.Message}\n{e.StackTrace}");
                                 await Client.SendError(stream, DProxyError.CONNECTION_FAILED);
                             }
 
@@ -225,9 +225,11 @@ namespace DProxyClient
                             var disconnect = await Client.ReadDisconnect(stream, incomingHeader);
 
                             if (Connections.TryGetValue(disconnect.ConnectionId, out var client)) {
-                                if (client.Client.Connected) {
+                                try {
                                     Console.WriteLine($"Disconnecting from {client.Client.RemoteEndPoint}...");
                                     client.Close();
+                                } catch (SocketException) {
+                                    //
                                 }
 
                                 Connections.Remove(disconnect.ConnectionId);
@@ -250,13 +252,13 @@ namespace DProxyClient
                                     // Send the data to the TCP endpoint.
                                     await client.GetStream().WriteAsync(writeBuffer.AsMemory(0, data.Ciphertext.Length));
                                 } catch (AuthenticationTagMismatchException e) {
-                                    Console.Error.WriteLine($"Failed to decrypt data from the DProxy Server: {e.GetType().Name} - {e.Message}");
+                                    Console.Error.WriteLine($"Failed to decrypt data from the DProxy Server: {e.GetType().Name} - {e.Message}\n{e.StackTrace}");
                                     throw new SocketException((int)SocketError.ConnectionReset);
                                 } catch (SocketException e) {
-                                    Console.Error.WriteLine($"Failed to relay data to the TCP endpoint: {e.GetType().Name} - {e.Message}");
+                                    Console.Error.WriteLine($"Failed to relay data to the TCP endpoint: {e.GetType().Name} - {e.Message}\n{e.StackTrace}");
                                     await Client.SendError(stream, DProxyError.CONNECTION_FAILED);
                                 } catch (IOException e) {
-                                    Console.Error.WriteLine($"Failed to relay data to the TCP endpoint: {e.GetType().Name} - {e.Message}");
+                                    Console.Error.WriteLine($"Failed to relay data to the TCP endpoint: {e.GetType().Name} - {e.Message}\n{e.StackTrace}");
                                     await Client.SendError(stream, DProxyError.CONNECTION_CLOSED);
                                 }
                             } else {
@@ -292,9 +294,9 @@ namespace DProxyClient
                             await Client.SendDisconnected(socket.GetStream(), connection.Key);
                         }
                     } catch (IOException e) {
-                        Console.Error.WriteLine($"Failed to send a disconnect message to the server: {e.GetType().Name} - {e.Message}");
+                        Console.Error.WriteLine($"Failed to send a disconnect message to the server: {e.GetType().Name} - {e.Message}\n{e.StackTrace}");
                     } catch (SocketException e) {
-                        Console.Error.WriteLine($"Failed to send a disconnect message to the server: {e.GetType().Name} - {e.Message}");
+                        Console.Error.WriteLine($"Failed to send a disconnect message to the server: {e.GetType().Name} - {e.Message}\n{e.StackTrace}");
                     }
                 }
 
@@ -341,17 +343,17 @@ namespace DProxyClient
                             break;
                         }
                     } catch (SocketException e) {
-                        Console.Error.WriteLine($"Failed to connect to the DProxy Server: {e.GetType().Name} - {e.Message}");
+                        Console.Error.WriteLine($"Failed to connect to the DProxy Server: {e.GetType().Name} - {e.Message}\n{e.StackTrace}");
 
                         await Task.Delay(5000);
                     } catch (IOException e) {
-                        Console.Error.WriteLine($"Failed to send data to the DProxy Server: {e.GetType().Name} - {e.Message}");
+                        Console.Error.WriteLine($"Failed to send data to the DProxy Server: {e.GetType().Name} - {e.Message}\n{e.StackTrace}");
 
                         await Task.Delay(5000);
                     }
                 }
             } catch (Exception e) {
-                Console.Error.WriteLine($"{e.GetType().Name}: {e.Message}");
+                Console.Error.WriteLine($"{e.GetType().Name}: {e.Message}\n{e.StackTrace}");
             }
         }
     }
