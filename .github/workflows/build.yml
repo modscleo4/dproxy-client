@@ -1,0 +1,103 @@
+name: 'Build .NET self-contained executable'
+
+on:
+  push:
+    branches:
+      - master
+
+env:
+  DOTNET_VERSION: '8.0'
+
+jobs:
+  build:
+    name: build-${{ matrix.target }}-${{ matrix.arch }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        arch: ['x64']
+        os: [ ubuntu-latest, windows-latest ]
+        include:
+          - os: 'windows-latest'
+            target: 'win'
+          - os: 'ubuntu-latest'
+            target: 'linux'
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Get Short SHA
+        id: short_sha
+        run: echo "sha=$(git rev-parse --short HEAD)" >> "$GITHUB_OUTPUT"
+
+      - name: Setup .NET Core
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: ${{ env.DOTNET_VERSION }}
+
+      - name: Install dependencies
+        run: dotnet restore
+
+      - name: Build
+        run: dotnet build --configuration Release --no-restore
+
+      - name: Publish
+        run: dotnet publish -p:PublishSingleFile=true
+
+      - name: Upload Build Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.target }}-${{ matrix.arch }}
+          path: DProxyClient/bin/Release/net${{ env.DOTNET_VERSION }}/${{ matrix.target }}-${{ matrix.arch }}/publish
+
+    outputs:
+      short-sha: ${{ steps.short_sha.outputs.sha }}
+
+  create-github-release:
+    name: Create Dev Release
+    runs-on: ubuntu-latest
+    needs: build
+
+    steps:
+      - name: Create Release
+        uses: actions/create-release@v1
+        id: create_release
+        with:
+          draft: false
+          prerelease: true
+          release_name: dev-${{ needs.build.outputs.short-sha }}
+          tag_name: dev-${{ needs.build.outputs.short-sha }}
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+
+    outputs:
+      upload_url: ${{ steps.create_release.outputs.upload_url }}
+
+  add-artifact-to-release:
+    name: publish-${{ matrix.target }}-${{ matrix.arch }}
+    runs-on: ubuntu-latest
+    needs: create-github-release
+    strategy:
+      matrix:
+        arch: [ 'x64' ]
+        target: ['win', 'linux']
+
+    steps:
+      - name: Download Build Artifact
+        id: artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: ${{ matrix.target }}-${{ matrix.arch }}
+          path: publish
+
+      - name: Zip directory
+        run: zip -r -j publish.zip ${{ steps.artifact.outputs.download-path }}
+
+      - name: upload build artifact
+        uses: actions/upload-release-asset@v1
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        with:
+          upload_url: ${{ needs.create-github-release.outputs.upload_url }}
+          asset_path: publish.zip
+          asset_name: DProxyClient-${{ matrix.target }}-${{ matrix.arch }}-zip
+          asset_content_type: 'application/zip'

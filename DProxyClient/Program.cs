@@ -25,7 +25,7 @@ namespace DProxyClient
         private static readonly string ClientPrivateKeyPath = Path.Combine(ConfigPath, "ClientPrivateKey.pem");
         private static readonly string ClientPublicKeyPath = Path.Combine(ConfigPath, "ClientPublicKey.pem");
         private static readonly string ClientTokenPath = Path.Combine(ConfigPath, "Token");
-        private static readonly ILogger Logger = Log.Factory.CreateLogger(typeof(Program).Namespace);
+        private static readonly ILogger Logger = Log.Factory.CreateLogger(typeof(Program).Namespace ?? string.Empty);
 
         /// <summary>
         /// Get the server's public key from the file system.
