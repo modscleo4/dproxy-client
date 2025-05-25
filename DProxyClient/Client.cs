@@ -21,7 +21,7 @@ namespace DProxyClient
 {
     public class Client
     {
-        public static byte[] SerializePacket(DProxyHeader header, byte[] data)
+        private static byte[] SerializePacket(DProxyHeader header, byte[] data)
         {
             var buffer = new byte[5 + data.Length];
             buffer[0] = header.Version;

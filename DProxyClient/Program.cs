@@ -18,7 +18,7 @@ using Microsoft.Extensions.Logging;
 
 namespace DProxyClient
 {
-    internal class Program
+    internal static class Program
     {
         private static readonly string ConfigPath = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "DProxy");
         private static readonly string ServerPublicKeyPath = Path.Combine(ConfigPath, "ServerPublicKey.pem");
@@ -27,11 +27,11 @@ namespace DProxyClient
         private static readonly string ClientTokenPath = Path.Combine(ConfigPath, "Token");
         private static readonly ILogger Logger = Log.Factory.CreateLogger(typeof(Program).Namespace);
 
-        /**
-         * Get the server's public key from the file system.
-         * 
-         * @return The server's public key.
-         */
+        /// <summary>
+        /// Get the server's public key from the file system.
+        /// </summary>
+        ///
+        /// <return>The server's public key.</return>
         private static ECDiffieHellman GetServerPublicKey()
         {
             var serverPublicKey = File.ReadAllText(ServerPublicKeyPath);
@@ -41,11 +41,11 @@ namespace DProxyClient
             return serverKey;
         }
 
-        /**
-         * Get the client's key pair from the file system.
-         * 
-         * @return The client's key pair.
-         */
+        /// <summary>
+        /// Get the client's key pair from the file system.
+        /// </summary>
+        ///
+        /// <return>The client's key pair.</return>
         private static ECDiffieHellman GetClientKeyPair()
         {
             var clientPrivateKey = File.ReadAllText(ClientPrivateKeyPath);
@@ -55,11 +55,11 @@ namespace DProxyClient
             return clientKey;
         }
 
-        /**
-         * Create a new client key pair and save it to the file system.
-         * 
-         * @return The client's key pair.
-         */
+        /// <summary>
+        /// Create a new client key pair and save it to the file system.
+        /// </summary>
+        ///
+        /// <return>The client's key pair.</return>
         private static ECDiffieHellman CreateClientKeyPair()
         {
             var clientKey = ECDiffieHellman.Create(ECCurve.CreateFromFriendlyName("secp384r1"));
@@ -81,7 +81,13 @@ namespace DProxyClient
         
         private static byte[] _writeBuffer = new byte[2 << 14];
 
-        private static async Task ReadSockets(AesGcm cipher, NetworkStream stream)
+        /// <summary>
+        /// Read data from the TCP endpoints and relay it to the server.
+        /// </summary>
+        ///
+        /// <param name="stream">The server's network stream.</param>
+        /// <param name="cipher">The cipher used to encrypt/decrypt the data.</param>
+        private static async Task ReadSockets(NetworkStream stream, AesGcm cipher)
         {
             using var _ = Logger.BeginScope(nameof(ReadSockets));
             
@@ -89,7 +95,7 @@ namespace DProxyClient
                 // Read the data from the TCP endpoints and relay it to the server.
                 foreach (var (connectionId, client) in Connections) {
                     while (client.Available > 0) {
-                        Logger.LogDebug("Reading {Bytes} from {RemoteEndPoint}...", client.Available, client.Client.RemoteEndPoint);
+                        Logger.LogDebug("Reading {Bytes} bytes from {RemoteEndPoint}...", client.Available, client.Client.RemoteEndPoint);
                         var bytesRead = await client.GetStream().ReadAsync(_readBuffer, CancellationToken.None);
                         if (bytesRead == 0) {
                             break;
@@ -112,13 +118,116 @@ namespace DProxyClient
             }
         }
 
-        /**
-         * Start the Socket connection with the server.
-         * 
-         * @param serverKey The server's public key.
-         * @param clientKey The client's key pair.
-         * @return Whether the connection was successful.
-         */
+        /// <summary>
+        /// Handle a packet received from the server.
+        /// </summary>
+        ///
+        /// <param name="stream">The server's network stream.</param>
+        /// <param name="header">The incoming packet header.</param>
+        /// <param name="cipher">The cipher used to encrypt/decrypt the data.</param>
+        private static async Task HandleServerPacket(NetworkStream stream, DProxyHeader header, AesGcm cipher) {
+            using var _ = Logger.BeginScope(nameof(StartSocket));
+
+            switch (header.Type) {
+                case DProxyPacketType.CONNECT: {
+                    var connect = await Client.ReadConnect(stream, header);
+                    Logger.LogInformation("Connecting to {Destination}:{Port}...", connect.Destination, connect.Port);
+
+                    if (Connections.ContainsKey(connect.ConnectionId)) {
+                        await Client.SendError(stream, DProxyError.INVALID_CONNECTION);
+                        return;
+                    }
+
+                    try {
+                        var client = new TcpClient();
+                        await client.ConnectAsync(connect.Destination, connect.Port);
+
+                        Connections[connect.ConnectionId] = client;
+
+                        await Client.SendConnected(stream, connect.ConnectionId);
+                    } catch (SocketException e) {
+                        Logger.LogError(e, "Failed to connect to {Destination}:{Port}.", connect.Destination, connect.Port);
+                        await Client.SendError(stream, DProxyError.CONNECTION_FAILED);
+                    }
+
+                    break;
+                }
+
+                case DProxyPacketType.DISCONNECT: {
+                    var disconnect = await Client.ReadDisconnect(stream, header);
+
+                    if (Connections.TryGetValue(disconnect.ConnectionId, out var client)) {
+                        try {
+                            Logger.LogInformation("Disconnecting from {Address}...", client.Client.RemoteEndPoint);
+                            client.Close();
+                        } catch (SocketException) {
+                            //
+                        }
+
+                        Connections.Remove(disconnect.ConnectionId);
+                        await Client.SendDisconnected(stream, disconnect.ConnectionId);
+                    } else {
+                        await Client.SendError(stream, DProxyError.INVALID_CONNECTION);
+                    }
+
+                    break;
+                }
+
+                case DProxyPacketType.DATA: {
+                    var data = await Client.ReadData(stream, header);
+
+                    if (Connections.TryGetValue(data.ConnectionId, out var client)) {
+                        try {
+                            // Decrypt the data with the shared secret.
+                            cipher.Decrypt(data.IV, data.Ciphertext, data.AuthenticationTag, new Span<byte>(_writeBuffer, 0, data.Ciphertext.Length));
+
+                            // Send the data to the TCP endpoint.
+                            Logger.LogDebug("Sending {Bytes} bytes of data to {RemoteEndPoint}...", data.Ciphertext.Length, client.Client.RemoteEndPoint);
+                            await client.GetStream().WriteAsync(_writeBuffer.AsMemory(0, data.Ciphertext.Length));
+                        } catch (AuthenticationTagMismatchException e) {
+                            Logger.LogError(e, "Failed to decrypt data from the DProxy Server.");
+                            throw new SocketException((int)SocketError.ConnectionReset);
+                        } catch (SocketException e) {
+                            Logger.LogError(e, "Failed to relay data to the TCP endpoint.");
+                            await Client.SendError(stream, DProxyError.CONNECTION_FAILED);
+                        } catch (IOException e) {
+                            Logger.LogError(e, "Failed to relay data to the TCP endpoint.");
+                            await Client.SendError(stream, DProxyError.CONNECTION_CLOSED);
+                        }
+                    } else {
+                        await Client.SendError(stream, DProxyError.INVALID_CONNECTION);
+                    }
+
+                    break;
+                }
+
+                case DProxyPacketType.HEARTBEAT: {
+                    var heartbeat = await Client.ReadHeartbeat(stream, header);
+                    Logger.LogTrace("Received a heartbeat from the server: {Timestamp}.", heartbeat.Timestamp);
+                    await Client.SendHeartbeatResponse(stream, (ulong)new DateTimeOffset(DateTime.UtcNow).ToUnixTimeMilliseconds());
+                    break;
+                }
+
+                case DProxyPacketType.HEARTBEAT_RESPONSE:
+                    var heartbeatResponse = await Client.ReadHeartbeatResponse(stream, header);
+                    Logger.LogTrace("Received a heartbeat response from the server: {Timestamp}.", heartbeatResponse.Timestamp);
+                    break;
+
+                default:
+                    Logger.LogWarning("Received an invalid packet type: {Type}.", header.Type);
+                    break;
+            }
+        }
+
+        /// <summary>
+        /// Start the Socket connection with the server.
+        /// </summary>
+        ///
+        /// <param name="serverHost">The server's host name or IP address.</param>'
+        /// <param name="serverKey">The server's public key.</param>
+        /// <param name="clientKey">The client's key pair.</param>
+        /// <return>Whether the connection was successful.</return>
+        ///
         private static async Task<bool> StartSocket(string serverHost, ECDiffieHellman serverKey, ECDiffieHellman clientKey)
         {
             using var _ = Logger.BeginScope(nameof(StartSocket));
@@ -190,7 +299,7 @@ namespace DProxyClient
                     Socket.Select(waitList, null, null, TimeSpan.FromSeconds(30));
 
                     // Read the data from the TCP endpoints and relay it to the server.
-                    await ReadSockets(cipher, stream);
+                    await ReadSockets(stream, cipher);
 
                     if (stream.Socket.Available == 0) {
                         if (waitList.Count == 1) {
@@ -201,95 +310,7 @@ namespace DProxyClient
                     }
 
                     var incomingHeader = await Client.GetPacketHeader(stream, false);
-                    switch (incomingHeader.Type) {
-                        case DProxyPacketType.CONNECT: {
-                            var connect = await Client.ReadConnect(stream, incomingHeader);
-                            Logger.LogInformation("Connecting to {Destination}:{Port}...", connect.Destination, connect.Port);
-
-                            if (Connections.ContainsKey(connect.ConnectionId)) {
-                                await Client.SendError(stream, DProxyError.INVALID_CONNECTION);
-                                continue;
-                            }
-
-                            try {
-                                var client = new TcpClient();
-                                await client.ConnectAsync(connect.Destination, connect.Port);
-
-                                Connections[connect.ConnectionId] = client;
-
-                                await Client.SendConnected(stream, connect.ConnectionId);
-                            } catch (SocketException e) {
-                                Logger.LogError(e, "Failed to connect to {Destination}:{Port}.", connect.Destination, connect.Port);
-                                await Client.SendError(stream, DProxyError.CONNECTION_FAILED);
-                            }
-
-                            break;
-                        }
-
-                        case DProxyPacketType.DISCONNECT: {
-                            var disconnect = await Client.ReadDisconnect(stream, incomingHeader);
-
-                            if (Connections.TryGetValue(disconnect.ConnectionId, out var client)) {
-                                try {
-                                    Logger.LogInformation("Disconnecting from {Address}...", client.Client.RemoteEndPoint);
-                                    client.Close();
-                                } catch (SocketException) {
-                                    //
-                                }
-
-                                Connections.Remove(disconnect.ConnectionId);
-                                await Client.SendDisconnected(stream, disconnect.ConnectionId);
-                            } else {
-                                await Client.SendError(stream, DProxyError.INVALID_CONNECTION);
-                            }
-
-                            break;
-                        }
-
-                        case DProxyPacketType.DATA: {
-                            var data = await Client.ReadData(stream, incomingHeader);
-
-                            if (Connections.TryGetValue(data.ConnectionId, out var client)) {
-                                try {
-                                    // Decrypt the data with the shared secret.
-                                    cipher.Decrypt(data.IV, data.Ciphertext, data.AuthenticationTag, new Span<byte>(_writeBuffer, 0, data.Ciphertext.Length));
-
-                                    // Send the data to the TCP endpoint.
-                                    Logger.LogDebug("Sending {Bytes} bytes of data to {RemoteEndPoint}...", data.Ciphertext.Length, client.Client.RemoteEndPoint);
-                                    await client.GetStream().WriteAsync(_writeBuffer.AsMemory(0, data.Ciphertext.Length));
-                                } catch (AuthenticationTagMismatchException e) {
-                                    Logger.LogError(e, "Failed to decrypt data from the DProxy Server.");
-                                    throw new SocketException((int)SocketError.ConnectionReset);
-                                } catch (SocketException e) {
-                                    Logger.LogError(e, "Failed to relay data to the TCP endpoint.");
-                                    await Client.SendError(stream, DProxyError.CONNECTION_FAILED);
-                                } catch (IOException e) {
-                                    Logger.LogError(e, "Failed to relay data to the TCP endpoint.");
-                                    await Client.SendError(stream, DProxyError.CONNECTION_CLOSED);
-                                }
-                            } else {
-                                await Client.SendError(stream, DProxyError.INVALID_CONNECTION);
-                            }
-
-                            break;
-                        }
-
-                        case DProxyPacketType.HEARTBEAT: {
-                            var heartbeat = await Client.ReadHeartbeat(stream, incomingHeader);
-                            Logger.LogTrace("Received a heartbeat from the server: {Timestamp}.", heartbeat.Timestamp);
-                            await Client.SendHeartbeatResponse(stream, (ulong)new DateTimeOffset(DateTime.UtcNow).ToUnixTimeMilliseconds());
-                            break;
-                        }
-
-                        case DProxyPacketType.HEARTBEAT_RESPONSE:
-                            var heartbeatResponse = await Client.ReadHeartbeatResponse(stream, incomingHeader);
-                            Logger.LogTrace("Received a heartbeat response from the server: {Timestamp}.", heartbeatResponse.Timestamp);
-                            break;
-
-                        default:
-                            Logger.LogWarning("Received an invalid packet type: {Type}.", incomingHeader.Type);
-                            continue;
-                    }
+                    await HandleServerPacket(stream, incomingHeader, cipher);
                 }
             } finally {
                 // Close all the TCP connections when the thread is terminated.
@@ -351,11 +372,7 @@ namespace DProxyClient
                             // Stop retrying if the server rejected the message.
                             break;
                         }
-                    } catch (SocketException e) {
-                        Logger.LogError(e, "Failed to connect to the DProxy Server.");
-
-                        await Task.Delay(5000);
-                    } catch (IOException e) {
+                    } catch (Exception e) when (e is SocketException or IOException or AuthenticationTagMismatchException) {
                         Logger.LogError(e, "Failed to connect to the DProxy Server.");
 
                         await Task.Delay(5000);
