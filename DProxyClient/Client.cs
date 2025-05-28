@@ -19,7 +19,7 @@ using System.Text;
 
 namespace DProxyClient
 {
-    public class Client
+    public static class Client
     {
         private static byte[] SerializePacket(DProxyHeader header, byte[] data)
         {
@@ -37,8 +37,8 @@ namespace DProxyClient
         public static async Task StartHandshake(NetworkStream stream, ECDiffieHellman clientKey)
         {
             var clientPublicKey = clientKey.PublicKey.ExportSubjectPublicKeyInfo();
-            var packet = new DProxyHandshakeInit(clientPublicKey);
-            var buffer = new byte[packet.Length];
+            var packet          = new DProxyHandshakeInit(clientPublicKey);
+            var buffer          = new byte[packet.Length];
             BinaryPrimitives.WriteUInt16BigEndian(buffer.AsSpan(0, 2), (ushort)packet.DERPublicKey.Length);
             packet.DERPublicKey.CopyTo(buffer.AsSpan(2, packet.DERPublicKey.Length));
 
@@ -48,7 +48,8 @@ namespace DProxyClient
         public static async Task<DProxyHeader> GetPacketHeader(NetworkStream stream, bool wait = true)
         {
             if (wait) {
-                Socket.Select(new List<Socket>() { stream.Socket }, new List<Socket>(), new List<Socket>(), TimeSpan.FromSeconds(30));
+                Socket.Select(new List<Socket> { stream.Socket }, new List<Socket>(), new List<Socket>(),
+                    TimeSpan.FromSeconds(30));
             }
 
             if (!stream.Socket.Connected || !stream.DataAvailable) {
@@ -58,10 +59,12 @@ namespace DProxyClient
             var headerBuffer = new byte[5];
             await stream.ReadExactlyAsync(headerBuffer, CancellationToken.None);
 
-            return new DProxyHeader(headerBuffer[0], (DProxyPacketType)headerBuffer[1], BinaryPrimitives.ReadUInt16BigEndian(headerBuffer.AsSpan(2, 2)), (DProxyError)headerBuffer[4]);
+            return new DProxyHeader(headerBuffer[0], (DProxyPacketType)headerBuffer[1],
+                BinaryPrimitives.ReadUInt16BigEndian(headerBuffer.AsSpan(2, 2)), (DProxyError)headerBuffer[4]);
         }
 
-        public static async Task<DProxyHandshakeResponse> ReadHandshakeResponse(NetworkStream stream, DProxyHeader header)
+        public static async Task<DProxyHandshakeResponse> ReadHandshakeResponse(NetworkStream stream,
+            DProxyHeader header)
         {
             var iv = new byte[12];
             await stream.ReadExactlyAsync(iv, CancellationToken.None);
@@ -158,7 +161,8 @@ namespace DProxyClient
             return new DProxyData(connectionId, iv, ciphertext, authenticationTag);
         }
 
-        public static async Task SendData(NetworkStream stream, uint connectionId, byte[] iv, byte[] ciphertext, byte[] authenticationTag)
+        public static async Task SendData(NetworkStream stream, uint connectionId, byte[] iv, byte[] ciphertext,
+            byte[] authenticationTag)
         {
             var packet = new DProxyData(connectionId, iv, ciphertext, authenticationTag);
             var buffer = new byte[packet.Length];
@@ -188,8 +192,9 @@ namespace DProxyClient
 
             await stream.WriteAsync(SerializePacket(packet, buffer), CancellationToken.None);
         }
-        
-        public static async Task<DProxyHeartbeatResponse> ReadHeartbeatResponse(NetworkStream stream, DProxyHeader header)
+
+        public static async Task<DProxyHeartbeatResponse> ReadHeartbeatResponse(NetworkStream stream,
+            DProxyHeader header)
         {
             var timestampBuffer = new byte[8];
             await stream.ReadExactlyAsync(timestampBuffer, CancellationToken.None);
