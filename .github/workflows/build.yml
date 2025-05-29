@@ -38,7 +38,7 @@ jobs:
         run: dotnet restore
 
       - name: Build
-        run: dotnet build --configuration Release --no-restore
+        run: dotnet build --configuration Release -p:ServerAddress=${{ secrets.DPROXY_SERVER_ADDRESS }} --no-restore
 
       - name: Publish
         run: dotnet publish -p:PublishSingleFile=true

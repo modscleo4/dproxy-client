@@ -14,15 +14,27 @@
 
 using System.Collections.Concurrent;
 using System.Net.Sockets;
+using System.Reflection;
 using System.Security.Cryptography;
 using Microsoft.Extensions.Logging;
 
 namespace DProxyClient
 {
+    [AttributeUsage(AttributeTargets.Assembly)]
+    public sealed class ServerAddressAttribute : Attribute
+    {
+        public string Value { get; set; }
+        public ServerAddressAttribute(string value)
+        {
+            Value = value;
+        }
+    }
+
     internal static class Program
     {
-        private static readonly string ConfigPath =
-            Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "DProxy");
+        private static readonly string ServerAddress = Assembly.GetExecutingAssembly().GetCustomAttribute<ServerAddressAttribute>()?.Value ?? "localhost";
+
+        private static readonly string ConfigPath = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "DProxy");
 
         private static readonly string ServerPublicKeyPath = Path.Combine(ConfigPath, "ServerPublicKey.pem");
         private static readonly string ClientPrivateKeyPath = Path.Combine(ConfigPath, "ClientPrivateKey.pem");
@@ -98,8 +110,7 @@ namespace DProxyClient
                 // Read the data from the TCP endpoints and relay it to the server.
                 foreach (var (connectionId, client) in Connections) {
                     while (client.Available > 0) {
-                        Logger.LogDebug("Reading {Bytes} bytes from {RemoteEndPoint}...", client.Available,
-                            client.Client.RemoteEndPoint);
+                        Logger.LogDebug("Reading {Bytes} bytes from {RemoteEndPoint}...", client.Available, client.Client.RemoteEndPoint);
                         var bytesRead = await client.GetStream().ReadAsync(_readBuffer, CancellationToken.None);
                         if (bytesRead == 0) {
                             break;
@@ -151,10 +162,8 @@ namespace DProxyClient
                         Connections[connect.ConnectionId] = client;
 
                         await Client.SendConnected(stream, connect.ConnectionId);
-                    }
-                    catch (SocketException e) {
-                        Logger.LogError(e, "Failed to connect to {Destination}:{Port}.", connect.Destination,
-                            connect.Port);
+                    } catch (SocketException e) {
+                        Logger.LogError(e, "Failed to connect to {Destination}:{Port}.", connect.Destination, connect.Port);
                         await Client.SendError(stream, DProxyError.CONNECTION_FAILED);
                     }
 
@@ -168,8 +177,7 @@ namespace DProxyClient
                         try {
                             Logger.LogInformation("Disconnecting from {Address}...", client.Client.RemoteEndPoint);
                             client.Close();
-                        }
-                        catch (SocketException) {
+                        } catch (SocketException) {
                             //
                         }
 
@@ -190,12 +198,15 @@ namespace DProxyClient
                     if (Connections.TryGetValue(data.ConnectionId, out var client)) {
                         try {
                             // Decrypt the data with the shared secret.
-                            cipher.Decrypt(data.IV, data.Ciphertext, data.AuthenticationTag,
-                                new Span<byte>(_writeBuffer, 0, data.Ciphertext.Length));
+                            cipher.Decrypt(
+                                data.IV,
+                                data.Ciphertext,
+                                data.AuthenticationTag,
+                                new Span<byte>(_writeBuffer, 0, data.Ciphertext.Length)
+                            );
 
                             // Send the data to the TCP endpoint.
-                            Logger.LogDebug("Sending {Bytes} bytes of data to {RemoteEndPoint}...",
-                                data.Ciphertext.Length, client.Client.RemoteEndPoint);
+                            Logger.LogDebug("Sending {Bytes} bytes of data to {RemoteEndPoint}...", data.Ciphertext.Length, client.Client.RemoteEndPoint);
                             await client.GetStream().WriteAsync(_writeBuffer.AsMemory(0, data.Ciphertext.Length));
                         }
                         catch (AuthenticationTagMismatchException e) {
@@ -221,15 +232,13 @@ namespace DProxyClient
                 case DProxyPacketType.HEARTBEAT: {
                     var heartbeat = await Client.ReadHeartbeat(stream, header);
                     Logger.LogTrace("Received a heartbeat from the server: {Timestamp}.", heartbeat.Timestamp);
-                    await Client.SendHeartbeatResponse(stream,
-                        (ulong)new DateTimeOffset(DateTime.UtcNow).ToUnixTimeMilliseconds());
+                    await Client.SendHeartbeatResponse(stream, GetCurrentTimestamp());
                     break;
                 }
 
                 case DProxyPacketType.HEARTBEAT_RESPONSE:
                     var heartbeatResponse = await Client.ReadHeartbeatResponse(stream, header);
-                    Logger.LogTrace("Received a heartbeat response from the server: {Timestamp}.",
-                        heartbeatResponse.Timestamp);
+                    Logger.LogTrace("Received a heartbeat response from the server: {Timestamp}.", heartbeatResponse.Timestamp);
                     break;
 
                 default:
@@ -238,12 +247,17 @@ namespace DProxyClient
             }
         }
 
+        private static ulong GetCurrentTimestamp()
+        {
+            return (ulong)new DateTimeOffset(DateTime.UtcNow).ToUnixTimeMilliseconds();
+        }
+
         private static async Task ReadServerSocket(NetworkStream stream, AesGcm cipher)
         {
             if (stream.Socket.Available == 0) {
-                if (Connections.IsEmpty)
-                    await Client.SendHeartbeat(stream,
-                        (ulong)new DateTimeOffset(DateTime.UtcNow).ToUnixTimeMilliseconds());
+                if (Connections.IsEmpty) {
+                    await Client.SendHeartbeat(stream, GetCurrentTimestamp());
+                }
 
                 return;
             }
@@ -283,8 +297,8 @@ namespace DProxyClient
                 // Derive the shared secret and the CEK.
                 var sharedSecret = clientKey.DeriveRawSecretAgreement(serverKey.PublicKey);
                 var cek          = HKDF.DeriveKey(HashAlgorithmName.SHA256, sharedSecret, 32);
-                Logger.LogDebug("Shared secret: {SharedSecret}", BitConverter.ToString(sharedSecret).Replace("-", ""));
-                Logger.LogDebug("CEK: {CEK}", BitConverter.ToString(cek).Replace("-", ""));
+                Logger.LogDebug("Shared secret: {SharedSecret}", Convert.ToHexString(sharedSecret));
+                Logger.LogDebug("CEK: {CEK}", Convert.ToHexString(cek));
 
                 // Start the handshake
                 // Send the public key to the server.
@@ -298,18 +312,15 @@ namespace DProxyClient
 
                 // Fetch the iv, cipher text and authentication tag from the server.
                 var handshakeResponse = await Client.ReadHandshakeResponse(stream, handshakeResponseHeader);
-                Logger.LogDebug("IV: {IV}", BitConverter.ToString(handshakeResponse.IV).Replace("-", ""));
-                Logger.LogDebug("Cipher Text: {CipherText}",
-                    BitConverter.ToString(handshakeResponse.Ciphertext).Replace("-", ""));
-                Logger.LogDebug("Authentication Tag: {AuthenticationTag}",
-                    BitConverter.ToString(handshakeResponse.AuthenticationTag).Replace("-", ""));
+                Logger.LogDebug("IV: {IV}", Convert.ToHexString(handshakeResponse.IV));
+                Logger.LogDebug("Cipher Text: {CipherText}", Convert.ToHexString(handshakeResponse.Ciphertext));
+                Logger.LogDebug("Authentication Tag: {AuthenticationTag}", Convert.ToHexString(handshakeResponse.AuthenticationTag));
 
                 // Decrypt the cipher text with the shared secret.
                 var cipher    = new AesGcm(cek, 16);
                 var plainText = new byte[handshakeResponse.Ciphertext.Length];
-                cipher.Decrypt(handshakeResponse.IV, handshakeResponse.Ciphertext, handshakeResponse.AuthenticationTag,
-                    plainText);
-                Logger.LogDebug("Plain Text: {PlainText}", BitConverter.ToString(plainText).Replace("-", ""));
+                cipher.Decrypt(handshakeResponse.IV, handshakeResponse.Ciphertext, handshakeResponse.AuthenticationTag, plainText);
+                Logger.LogDebug("Plain Text: {PlainText}", Convert.ToHexString(plainText));
 
                 // Send the plain text back to the server.
                 await Client.SendHandshakeFinal(stream, plainText);
@@ -349,11 +360,9 @@ namespace DProxyClient
                         if (socket.Connected && socket.GetStream().CanWrite) {
                             await Client.SendDisconnected(socket.GetStream(), connection.Key);
                         }
-                    }
-                    catch (IOException e) {
+                    } catch (IOException e) {
                         Logger.LogError(e, "Failed to send a disconnect message to the server.");
-                    }
-                    catch (SocketException e) {
+                    } catch (SocketException e) {
                         Logger.LogError(e, "Failed to send a disconnect message to the server.");
                     }
                 }
@@ -381,8 +390,7 @@ namespace DProxyClient
 
                     // Save the server's public key to the file system.
                     await File.WriteAllTextAsync(ServerPublicKeyPath, serverKey.ExportSubjectPublicKeyInfoPem());
-                }
-                else {
+                } else {
                     serverKey = GetServerPublicKey();
                 }
 
@@ -391,23 +399,22 @@ namespace DProxyClient
 
                     // Send Public Key to Key Exchange Server
                     Logger.LogInformation("Sending client's public key to Key Exchange Server...");
-                    await KeyServer.SendClientPublicKeyToExchangeServer(clientKey,
-                        (await File.ReadAllTextAsync(ClientTokenPath)).Trim());
-                }
-                else {
+                    await KeyServer.SendClientPublicKeyToExchangeServer(
+                        clientKey,
+                        (await File.ReadAllTextAsync(ClientTokenPath)).Trim()
+                    );
+                } else {
                     clientKey = GetClientKeyPair();
                 }
 
                 // Retry the connection if the server closed it prematurely.
                 while (true) {
                     try {
-                        if (!await StartSocket("localhost", serverKey, clientKey)) {
+                        if (!await StartSocket(ServerAddress, serverKey, clientKey)) {
                             // Stop retrying if the server rejected the message.
                             break;
                         }
-                    }
-                    catch (Exception e) when
-                        (e is SocketException or IOException or AuthenticationTagMismatchException) {
+                    } catch (Exception e) when (e is SocketException or IOException or AuthenticationTagMismatchException) {
                         Logger.LogError(e, "Failed to connect to the DProxy Server.");
 
                         await Task.Delay(5000);

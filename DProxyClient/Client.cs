@@ -48,8 +48,12 @@ namespace DProxyClient
         public static async Task<DProxyHeader> GetPacketHeader(NetworkStream stream, bool wait = true)
         {
             if (wait) {
-                Socket.Select(new List<Socket> { stream.Socket }, new List<Socket>(), new List<Socket>(),
-                    TimeSpan.FromSeconds(30));
+                Socket.Select(
+                    new List<Socket> { stream.Socket },
+                    new List<Socket>(),
+                    new List<Socket>(),
+                    TimeSpan.FromSeconds(30)
+                );
             }
 
             if (!stream.Socket.Connected || !stream.DataAvailable) {
@@ -59,8 +63,12 @@ namespace DProxyClient
             var headerBuffer = new byte[5];
             await stream.ReadExactlyAsync(headerBuffer, CancellationToken.None);
 
-            return new DProxyHeader(headerBuffer[0], (DProxyPacketType)headerBuffer[1],
-                BinaryPrimitives.ReadUInt16BigEndian(headerBuffer.AsSpan(2, 2)), (DProxyError)headerBuffer[4]);
+            return new DProxyHeader(
+                headerBuffer[0],
+                (DProxyPacketType)headerBuffer[1],
+                BinaryPrimitives.ReadUInt16BigEndian(headerBuffer.AsSpan(2, 2)),
+                (DProxyError)headerBuffer[4]
+            );
         }
 
         public static async Task<DProxyHandshakeResponse> ReadHandshakeResponse(NetworkStream stream,

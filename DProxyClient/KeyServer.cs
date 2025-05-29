@@ -12,19 +12,17 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-using System;
-using System.Collections.Generic;
-using System.Linq;
 using System.Net.Http.Headers;
+using System.Reflection;
 using System.Security.Cryptography;
 using System.Text;
-using System.Threading.Tasks;
 
 namespace DProxyClient
 {
     class KeyServer
     {
-        public static readonly string KeyExchangeServer = "http://localhost:8080";
+        private static readonly string ServerAddress = Assembly.GetExecutingAssembly().GetCustomAttribute<ServerAddressAttribute>()?.Value ?? "localhost";
+        public static readonly string KeyExchangeServer = $"http://{ServerAddress}:8080";
 
         public static async Task<ECDiffieHellman> GetServerPublicKeyFromExchangeServer()
         {
