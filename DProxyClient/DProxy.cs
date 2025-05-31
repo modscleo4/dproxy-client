@@ -25,9 +25,10 @@ namespace DProxyClient
         DISCONNECT,
         DISCONNECTED,
         DATA,
+        ENCRYPTED_DATA,
         HEARTBEAT,
         HEARTBEAT_RESPONSE,
-        ERROR
+        ERROR,
     }
 
     public enum DProxyError : byte
@@ -43,7 +44,8 @@ namespace DProxyClient
         CONNECTION_FAILED,
         CONNECTION_CLOSED,
         CONNECTION_TIMEOUT,
-        INVALID_CONNECTION
+        INVALID_CONNECTION,
+        DECRYPT_FAILED,
     }
 
     [Serializable()]
@@ -65,7 +67,9 @@ namespace DProxyClient
 
     public record DProxyDisconnected(uint ConnectionId) : DProxyHeader(1, DProxyPacketType.DISCONNECTED, 4, DProxyError.NO_ERROR);
 
-    public record DProxyData(uint ConnectionId, byte[] IV, byte[] Ciphertext, byte[] AuthenticationTag) : DProxyHeader(1, DProxyPacketType.DATA, (ushort)(4 + IV.Length + 2 + Ciphertext.Length + AuthenticationTag.Length), DProxyError.NO_ERROR);
+    public record DProxyData(uint ConnectionId, byte[] Data) : DProxyHeader(1, DProxyPacketType.DATA, (ushort)(4 + 2 + Data.Length), DProxyError.NO_ERROR);
+
+    public record DProxyEncryptedData(uint ConnectionId, byte[] IV, byte[] Ciphertext, byte[] AuthenticationTag) : DProxyHeader(1, DProxyPacketType.ENCRYPTED_DATA, (ushort)(4 + IV.Length + 2 + Ciphertext.Length + AuthenticationTag.Length), DProxyError.NO_ERROR);
 
     public record DProxyHeartbeat(ulong Timestamp) : DProxyHeader(1, DProxyPacketType.HEARTBEAT, 8, DProxyError.NO_ERROR);
 

@@ -45,15 +45,11 @@ namespace DProxyClient
             await stream.WriteAsync(SerializePacket(packet, buffer), CancellationToken.None);
         }
 
-        public static async Task<DProxyHeader> GetPacketHeader(NetworkStream stream, bool wait = true)
+        public static async Task<DProxyHeader> GetPacketHeader(NetworkStream stream, TimeSpan timeout)
         {
-            if (wait) {
-                Socket.Select(
-                    new List<Socket> { stream.Socket },
-                    new List<Socket>(),
-                    new List<Socket>(),
-                    TimeSpan.FromSeconds(30)
-                );
+            // Wait for data to be available on the TCP endpoint.
+            if (!stream.Socket.Poll(timeout, SelectMode.SelectRead)) {
+                throw new SocketException((int)SocketError.TimedOut);
             }
 
             if (!stream.Socket.Connected || !stream.DataAvailable) {
@@ -153,6 +149,33 @@ namespace DProxyClient
             await stream.ReadExactlyAsync(connectionIdBuffer, CancellationToken.None);
             var connectionId = BinaryPrimitives.ReadUInt32BigEndian(connectionIdBuffer);
 
+            var dataLengthBuffer = new byte[2];
+            await stream.ReadExactlyAsync(dataLengthBuffer, CancellationToken.None);
+            var dataLength = BinaryPrimitives.ReadUInt16BigEndian(dataLengthBuffer);
+
+            var data = new byte[dataLength];
+            await stream.ReadExactlyAsync(data, CancellationToken.None);
+
+            return new DProxyData(connectionId, data);
+        }
+
+        public static async Task SendData(NetworkStream stream, uint connectionId, byte[] data)
+        {
+            var packet = new DProxyData(connectionId, data);
+            var buffer = new byte[packet.Length];
+            BinaryPrimitives.WriteUInt32BigEndian(buffer.AsSpan(0, 4), packet.ConnectionId);
+            BinaryPrimitives.WriteUInt16BigEndian(buffer.AsSpan(4, 2), (ushort)packet.Data.Length);
+            data.CopyTo(buffer.AsSpan(6, packet.Data.Length));
+
+            await stream.WriteAsync(SerializePacket(packet, buffer), CancellationToken.None);
+        }
+
+        public static async Task<DProxyEncryptedData> ReadEncryptedData(NetworkStream stream, DProxyHeader header)
+        {
+            var connectionIdBuffer = new byte[4];
+            await stream.ReadExactlyAsync(connectionIdBuffer, CancellationToken.None);
+            var connectionId = BinaryPrimitives.ReadUInt32BigEndian(connectionIdBuffer);
+
             var iv = new byte[12];
             await stream.ReadExactlyAsync(iv, CancellationToken.None);
 
@@ -166,13 +189,12 @@ namespace DProxyClient
             var authenticationTag = new byte[16];
             await stream.ReadExactlyAsync(authenticationTag, CancellationToken.None);
 
-            return new DProxyData(connectionId, iv, ciphertext, authenticationTag);
+            return new DProxyEncryptedData(connectionId, iv, ciphertext, authenticationTag);
         }
 
-        public static async Task SendData(NetworkStream stream, uint connectionId, byte[] iv, byte[] ciphertext,
-            byte[] authenticationTag)
+        public static async Task SendEncryptedData(NetworkStream stream, uint connectionId, byte[] iv, byte[] ciphertext, byte[] authenticationTag)
         {
-            var packet = new DProxyData(connectionId, iv, ciphertext, authenticationTag);
+            var packet = new DProxyEncryptedData(connectionId, iv, ciphertext, authenticationTag);
             var buffer = new byte[packet.Length];
             BinaryPrimitives.WriteUInt32BigEndian(buffer.AsSpan(0, 4), packet.ConnectionId);
             iv.CopyTo(buffer.AsSpan(4, 12));
@@ -218,6 +240,18 @@ namespace DProxyClient
             BinaryPrimitives.WriteUInt64BigEndian(buffer.AsSpan(0, 8), packet.Timestamp);
 
             await stream.WriteAsync(SerializePacket(packet, buffer), CancellationToken.None);
+        }
+
+        public static async Task<DProxyErrorPacket> ReadError(NetworkStream stream, DProxyHeader header)
+        {
+            var messageLengthBuffer = new byte[2];
+            await stream.ReadExactlyAsync(messageLengthBuffer, CancellationToken.None);
+            var messageLength = BinaryPrimitives.ReadUInt16BigEndian(messageLengthBuffer);
+
+            var message = new byte[messageLength];
+            await stream.ReadExactlyAsync(message, CancellationToken.None);
+
+            return new DProxyErrorPacket(header.ErrorCode, Encoding.UTF8.GetString(message));
         }
 
         public static async Task SendError(NetworkStream stream, DProxyError errorCode, string message = "")
