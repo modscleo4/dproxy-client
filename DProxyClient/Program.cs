@@ -187,6 +187,8 @@ namespace DProxyClient
 
                             await client.ConnectAsync(packet.Destination, packet.Port, cts.Token);
                             client.NoDelay = true;
+                            client.SendBufferSize = 2 << 14;
+                            client.ReceiveBufferSize = 2 << 14;
 
                             Connections[packet.ConnectionId]           = client;
                             ConnectionReadBuffer[packet.ConnectionId]  = new byte[2 << 14];
@@ -365,6 +367,8 @@ namespace DProxyClient
                 // Establish a connection with the server.
                 await socket.ConnectAsync(serverHost, 8081);
                 socket.NoDelay = true;
+                socket.SendBufferSize = 2 << 15;
+                socket.ReceiveBufferSize = 2 << 15;
                 var stream = socket.GetStream();
 
                 // Derive the shared secret and the CEK.
