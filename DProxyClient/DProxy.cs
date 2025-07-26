@@ -57,7 +57,7 @@ namespace DProxyClient
 
     public record DProxyHandshakeFinal(byte[] Plaintext) : DProxyHeader(1, DProxyPacketType.HANDSHAKE_FINAL, (ushort)(2 + Plaintext.Length), DProxyError.NO_ERROR);
 
-    public record DProxyHandshakeFinalized() : DProxyHeader(1, DProxyPacketType.HANDSHAKE_FINALIZED, 0, DProxyError.NO_ERROR);
+    public record DProxyHandshakeFinalized(string Id) : DProxyHeader(1, DProxyPacketType.HANDSHAKE_FINALIZED, (ushort)(2 + Id.Length), DProxyError.NO_ERROR);
 
     public record DProxyConnect(uint ConnectionId, string Destination, ushort Port) : DProxyHeader(1, DProxyPacketType.CONNECT, (ushort)(4 + 2 + Destination.Length + 2), DProxyError.NO_ERROR);
 
@@ -65,7 +65,7 @@ namespace DProxyClient
 
     public record DProxyDisconnect(uint ConnectionId) : DProxyHeader(1, DProxyPacketType.DISCONNECT, 4, DProxyError.NO_ERROR);
 
-    public record DProxyDisconnected(uint ConnectionId) : DProxyHeader(1, DProxyPacketType.DISCONNECTED, 4, DProxyError.NO_ERROR);
+    public record DProxyDisconnected(uint ConnectionId, DProxyError ErrorCode = DProxyError.NO_ERROR) : DProxyHeader(1, DProxyPacketType.DISCONNECTED, 4, ErrorCode);
 
     public record DProxyData(uint ConnectionId, byte[] Data) : DProxyHeader(1, DProxyPacketType.DATA, (ushort)(4 + 2 + Data.Length), DProxyError.NO_ERROR);
 

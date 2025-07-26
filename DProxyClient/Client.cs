@@ -96,6 +96,18 @@ namespace DProxyClient
             await stream.WriteAsync(SerializePacket(packet, buffer), CancellationToken.None);
         }
 
+        public static async Task<DProxyHandshakeFinalized> ReadHandshakeFinalized(NetworkStream stream, DProxyHeader header)
+        {
+            var idLengthBuffer = new byte[2];
+            await stream.ReadExactlyAsync(idLengthBuffer, CancellationToken.None);
+            var idLength = BinaryPrimitives.ReadUInt16BigEndian(idLengthBuffer);
+
+            var id = new byte[idLength];
+            await stream.ReadExactlyAsync(id, CancellationToken.None);
+
+            return new DProxyHandshakeFinalized(Encoding.UTF8.GetString(id));
+        }
+
         public static async Task<DProxyConnect> ReadConnect(NetworkStream stream, DProxyHeader header)
         {
             var connectionIdBuffer = new byte[4];
@@ -134,9 +146,8 @@ namespace DProxyClient
             return new DProxyDisconnect(connectionId);
         }
 
-        public static async Task SendDisconnected(NetworkStream stream, uint connectionId)
-        {
-            var packet = new DProxyDisconnected(connectionId);
+        public static async Task SendDisconnected(NetworkStream stream, uint connectionId, DProxyError errorCode = DProxyError.NO_ERROR) {
+            var packet = new DProxyDisconnected(connectionId, errorCode);
             var buffer = new byte[packet.Length];
             BinaryPrimitives.WriteUInt32BigEndian(buffer.AsSpan(0, 4), packet.ConnectionId);
 

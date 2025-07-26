@@ -50,9 +50,6 @@ namespace DProxyClient
         private static readonly ConcurrentDictionary<uint, byte[]> ConnectionReadBuffer = [];
         private static readonly ConcurrentDictionary<uint, byte[]> ConnectionWriteBuffer = [];
 
-        //private static readonly byte[] _readBuffer = new byte[2 << 14];
-
-        //private static readonly byte[] _writeBuffer = new byte[2 << 14];
         private static readonly bool EncryptData = true;
 
         /// <summary>
@@ -169,7 +166,7 @@ namespace DProxyClient
             switch (header.Type) {
                 case DProxyPacketType.CONNECT: {
                     var packet = await Client.ReadConnect(stream, header);
-                    Logger.LogInformation("Connecting to {Destination}:{Port}...", packet.Destination, packet.Port);
+                    Logger.LogDebug("Connection {ConnectionId}: {Destination}:{Port}.", packet.ConnectionId, packet.Destination, packet.Port);
 
                     if (Connections.ContainsKey(packet.ConnectionId)) {
                         await Client.SendError(stream, DProxyError.INVALID_CONNECTION);
@@ -181,11 +178,13 @@ namespace DProxyClient
 
                         try {
                             using var cts = new CancellationTokenSource();
-                            cts.CancelAfter(30000);
+                            cts.CancelAfter(1000);
 
                             var client = new TcpClient();
 
+                            Logger.LogDebug("Connecting {ConnectionId} to {Destination}:{Port}...", packet.ConnectionId, packet.Destination, packet.Port);
                             await client.ConnectAsync(packet.Destination, packet.Port, cts.Token);
+                            Logger.LogInformation("Connected {ConnectionId} to {Destination}:{Port}.", packet.ConnectionId, packet.Destination, packet.Port);
                             client.NoDelay = true;
                             client.SendBufferSize = 2 << 14;
                             client.ReceiveBufferSize = 2 << 14;
@@ -207,13 +206,18 @@ namespace DProxyClient
                                 if (!await ReadConnectedSocket(stream, cipher, packet.ConnectionId, client)) {
                                     break;
                                 }
+
+                                await Task.Yield();
                             }
+
+                            Logger.LogDebug("Connection {ConnectionId} terminated.", packet.ConnectionId);
+                            client.Close();
                         } catch (SocketException e) {
                             Logger.LogError(e, "Failed to connect to {Destination}:{Port}.", packet.Destination, packet.Port);
-                            await Client.SendError(stream, DProxyError.CONNECTION_FAILED);
+                            await Client.SendDisconnected(stream, packet.ConnectionId, DProxyError.CONNECTION_FAILED);
                         } catch (OperationCanceledException e) {
                             Logger.LogError(e, "Failed to connect to {Destination}:{Port}.", packet.Destination, packet.Port);
-                            await Client.SendError(stream, DProxyError.CONNECTION_TIMEOUT);
+                            await Client.SendDisconnected(stream, packet.ConnectionId, DProxyError.CONNECTION_TIMEOUT);
                         } catch (Exception e) {
                             Logger.LogError(e, "Failed to connect to {Destination}:{Port}.", packet.Destination, packet.Port);
                         } finally {
@@ -403,10 +407,13 @@ namespace DProxyClient
                 await Client.SendHandshakeFinal(stream, plainText);
 
                 // Check if the server accepted the message.
-                var handshakeResultHeader = await Client.GetPacketHeader(stream, TimeSpan.FromSeconds(30));
-                if (!Client.ValidateHeader(handshakeResultHeader, DProxyPacketType.HANDSHAKE_FINALIZED)) {
+                var handshakeFinalizedHeader = await Client.GetPacketHeader(stream, TimeSpan.FromSeconds(30));
+                if (!Client.ValidateHeader(handshakeFinalizedHeader, DProxyPacketType.HANDSHAKE_FINALIZED)) {
                     return false;
                 }
+
+                var handshakeFinalizedResponse = await Client.ReadHandshakeFinalized(stream, handshakeFinalizedHeader);
+                Logger.LogDebug("User Id: {Id}", handshakeFinalizedResponse.Id);
 
                 Logger.LogInformation("The handshake was successful.");
                 while (true) {
