@@ -11,12 +11,16 @@ env:
 jobs:
   build:
     name: build-${{ matrix.target }}-${{ matrix.arch }}
-    runs-on: ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}${{ matrix.suffix }}
     strategy:
       matrix:
-        arch: ['x64']
+        arch: ['x64', 'arm64']
         os: [ ubuntu-latest, windows-latest ]
         include:
+          - arch: 'x64'
+            suffix: ''
+          - arch: 'arm64'
+            suffix: '-arm'
           - os: 'windows-latest'
             target: 'win'
           - os: 'ubuntu-latest'
@@ -78,7 +82,7 @@ jobs:
     needs: create-github-release
     strategy:
       matrix:
-        arch: [ 'x64' ]
+        arch: ['x64', 'arm64']
         target: ['win', 'linux']
 
     steps:
