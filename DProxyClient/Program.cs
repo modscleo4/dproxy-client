@@ -13,6 +13,7 @@
 // limitations under the License.
 
 using System.Collections.Concurrent;
+using System.Net;
 using System.Net.Sockets;
 using System.Reflection;
 using System.Security.Cryptography;
@@ -188,11 +189,12 @@ namespace DProxyClient
                             client.NoDelay = true;
                             client.SendBufferSize = 2 << 14;
                             client.ReceiveBufferSize = 2 << 14;
+                            var bndAddr = ((IPEndPoint?)client.Client.LocalEndPoint)?.Address?.ToString() ?? "0.0.0.0";
 
                             Connections[packet.ConnectionId]           = client;
                             ConnectionReadBuffer[packet.ConnectionId]  = new byte[2 << 14];
                             ConnectionWriteBuffer[packet.ConnectionId] = new byte[2 << 14];
-                            await Client.SendConnected(stream, packet.ConnectionId);
+                            await Client.SendConnected(stream, packet.ConnectionId, bndAddr);
 
                             while (client.Connected) {
                                 if (!stream.Socket.Connected) {
@@ -315,13 +317,14 @@ namespace DProxyClient
                 case DProxyPacketType.HEARTBEAT: {
                     var packet = await Client.ReadHeartbeat(stream, header);
                     Logger.LogTrace("Received a heartbeat from the server: {Timestamp}.", packet.Timestamp);
-                    await Client.SendHeartbeatResponse(stream, GetCurrentTimestamp());
+
+                    await Client.SendHeartbeatResponse(stream, packet.Timestamp, GetCurrentTimestamp());
                     break;
                 }
 
                 case DProxyPacketType.HEARTBEAT_RESPONSE: {
                     var packet = await Client.ReadHeartbeatResponse(stream, header);
-                    Logger.LogTrace("Received a heartbeat response from the server: {Timestamp}.", packet.Timestamp);
+                    Logger.LogTrace("Received a heartbeat response from the server: {Latency}.", packet.TimestampReceiver - packet.TimestampSender);
                     break;
                 }
 

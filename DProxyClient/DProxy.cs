@@ -61,7 +61,7 @@ namespace DProxyClient
 
     public record DProxyConnect(uint ConnectionId, string Destination, ushort Port) : DProxyHeader(1, DProxyPacketType.CONNECT, (ushort)(4 + 2 + Destination.Length + 2), DProxyError.NO_ERROR);
 
-    public record DProxyConnected(uint ConnectionId) : DProxyHeader(1, DProxyPacketType.CONNECTED, 4, DProxyError.NO_ERROR);
+    public record DProxyConnected(uint ConnectionId, string Endpoint) : DProxyHeader(1, DProxyPacketType.CONNECTED, (ushort)(4 + 2 + Endpoint.Length), DProxyError.NO_ERROR);
 
     public record DProxyDisconnect(uint ConnectionId) : DProxyHeader(1, DProxyPacketType.DISCONNECT, 4, DProxyError.NO_ERROR);
 
@@ -73,7 +73,7 @@ namespace DProxyClient
 
     public record DProxyHeartbeat(ulong Timestamp) : DProxyHeader(1, DProxyPacketType.HEARTBEAT, 8, DProxyError.NO_ERROR);
 
-    public record DProxyHeartbeatResponse(ulong Timestamp) : DProxyHeader(1, DProxyPacketType.HEARTBEAT_RESPONSE, 8, DProxyError.NO_ERROR);
+    public record DProxyHeartbeatResponse(ulong TimestampSender, ulong TimestampReceiver) : DProxyHeader(1, DProxyPacketType.HEARTBEAT_RESPONSE, 8 + 8, DProxyError.NO_ERROR);
 
     public record DProxyErrorPacket(DProxyError ErrorCode, string Message) : DProxyHeader(1, DProxyPacketType.ERROR, (ushort)(2 + Message.Length), ErrorCode);
 }

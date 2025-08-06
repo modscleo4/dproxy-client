@@ -128,11 +128,13 @@ namespace DProxyClient
             return new DProxyConnect(connectionId, Encoding.UTF8.GetString(destination), port);
         }
 
-        public static async Task SendConnected(NetworkStream stream, uint connectionId)
+        public static async Task SendConnected(NetworkStream stream, uint connectionId, string endpoint)
         {
-            var packet = new DProxyConnected(connectionId);
+            var packet = new DProxyConnected(connectionId, endpoint);
             var buffer = new byte[packet.Length];
             BinaryPrimitives.WriteUInt32BigEndian(buffer.AsSpan(0, 4), packet.ConnectionId);
+            BinaryPrimitives.WriteUInt16BigEndian(buffer.AsSpan(4, 2), (ushort)packet.Endpoint.Length);
+            Encoding.UTF8.GetBytes(packet.Endpoint).CopyTo(buffer.AsSpan(6, packet.Endpoint.Length));
 
             await stream.WriteAsync(SerializePacket(packet, buffer), CancellationToken.None);
         }
@@ -234,21 +236,26 @@ namespace DProxyClient
             await stream.WriteAsync(SerializePacket(packet, buffer), CancellationToken.None);
         }
 
-        public static async Task<DProxyHeartbeatResponse> ReadHeartbeatResponse(NetworkStream stream,
-            DProxyHeader header)
+        public static async Task<DProxyHeartbeatResponse> ReadHeartbeatResponse(NetworkStream stream, DProxyHeader header)
         {
-            var timestampBuffer = new byte[8];
-            await stream.ReadExactlyAsync(timestampBuffer, CancellationToken.None);
-            var timestamp = BinaryPrimitives.ReadUInt64BigEndian(timestampBuffer);
+            var timestampSenderBuffer = new byte[8];
+            await stream.ReadExactlyAsync(timestampSenderBuffer, CancellationToken.None);
+            var timestampSender = BinaryPrimitives.ReadUInt64BigEndian(timestampSenderBuffer);
 
-            return new DProxyHeartbeatResponse(timestamp);
+
+            var timestampReceiverBuffer = new byte[8];
+            await stream.ReadExactlyAsync(timestampReceiverBuffer, CancellationToken.None);
+            var timestampReceiver = BinaryPrimitives.ReadUInt64BigEndian(timestampReceiverBuffer);
+
+            return new DProxyHeartbeatResponse(timestampSender, timestampReceiver);
         }
 
-        public static async Task SendHeartbeatResponse(NetworkStream stream, ulong timestamp)
+        public static async Task SendHeartbeatResponse(NetworkStream stream, ulong timestampSender, ulong timestampReceiver)
         {
-            var packet = new DProxyHeartbeatResponse(timestamp);
+            var packet = new DProxyHeartbeatResponse(timestampSender, timestampReceiver);
             var buffer = new byte[packet.Length];
-            BinaryPrimitives.WriteUInt64BigEndian(buffer.AsSpan(0, 8), packet.Timestamp);
+            BinaryPrimitives.WriteUInt64BigEndian(buffer.AsSpan(0, 8), packet.TimestampSender);
+            BinaryPrimitives.WriteUInt64BigEndian(buffer.AsSpan(8, 8), packet.TimestampReceiver);
 
             await stream.WriteAsync(SerializePacket(packet, buffer), CancellationToken.None);
         }
