@@ -109,17 +109,9 @@ namespace DProxyClient
         /// <returns>Whether the TCP Socket is still connected or not.</returns>
         private static async Task<bool> ReadConnectedSocket(NetworkStream stream, AesGcm cipher, uint connectionId, TcpClient client)
         {
-            if (client.Available == 0) {
-                return true;
-            }
-
             var buffer = ConnectionReadBuffer[connectionId];
-            if (!client.Connected) {
-                return false;
-            }
 
             try {
-                Logger.LogDebug("Reading {Bytes} bytes from {RemoteEndPoint}...", client.Available, client.Client.RemoteEndPoint);
                 var bytesRead = await client.GetStream().ReadAsync(buffer, CancellationToken.None);
                 if (bytesRead == 0) {
                     return true;
@@ -196,12 +188,12 @@ namespace DProxyClient
                             ConnectionWriteBuffer[packet.ConnectionId] = new byte[2 << 14];
                             await Client.SendConnected(stream, packet.ConnectionId, bndAddr);
 
-                            while (client.Connected) {
+                            while (true) {
                                 if (!stream.Socket.Connected) {
                                     break;
                                 }
 
-                                if (!client.Client.Poll(Timeout.InfiniteTimeSpan, SelectMode.SelectRead)) {
+                                if (!client.Connected) {
                                     break;
                                 }
 

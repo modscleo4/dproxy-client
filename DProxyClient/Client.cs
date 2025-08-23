@@ -47,12 +47,7 @@ namespace DProxyClient
 
         public static async Task<DProxyHeader> GetPacketHeader(NetworkStream stream, TimeSpan timeout)
         {
-            // Wait for data to be available on the TCP endpoint.
-            if (!stream.Socket.Poll(timeout, SelectMode.SelectRead)) {
-                throw new SocketException((int)SocketError.TimedOut);
-            }
-
-            if (!stream.Socket.Connected || !stream.DataAvailable) {
+            if (!stream.Socket.Connected) {
                 throw new SocketException((int)SocketError.NotConnected);
             }
 
@@ -67,9 +62,10 @@ namespace DProxyClient
             );
         }
 
-        public static async Task<DProxyHandshakeResponse> ReadHandshakeResponse(NetworkStream stream,
-            DProxyHeader header)
-        {
+        public static async Task<DProxyHandshakeResponse> ReadHandshakeResponse(
+            NetworkStream stream,
+            DProxyHeader header
+        ) {
             var iv = new byte[12];
             await stream.ReadExactlyAsync(iv, CancellationToken.None);
 
@@ -96,8 +92,10 @@ namespace DProxyClient
             await stream.WriteAsync(SerializePacket(packet, buffer), CancellationToken.None);
         }
 
-        public static async Task<DProxyHandshakeFinalized> ReadHandshakeFinalized(NetworkStream stream, DProxyHeader header)
-        {
+        public static async Task<DProxyHandshakeFinalized> ReadHandshakeFinalized(
+            NetworkStream stream,
+            DProxyHeader header
+        ) {
             var idLengthBuffer = new byte[2];
             await stream.ReadExactlyAsync(idLengthBuffer, CancellationToken.None);
             var idLength = BinaryPrimitives.ReadUInt16BigEndian(idLengthBuffer);
@@ -148,7 +146,11 @@ namespace DProxyClient
             return new DProxyDisconnect(connectionId);
         }
 
-        public static async Task SendDisconnected(NetworkStream stream, uint connectionId, DProxyError errorCode = DProxyError.NO_ERROR) {
+        public static async Task SendDisconnected(
+            NetworkStream stream,
+            uint connectionId,
+            DProxyError errorCode = DProxyError.NO_ERROR
+        ) {
             var packet = new DProxyDisconnected(connectionId, errorCode);
             var buffer = new byte[packet.Length];
             BinaryPrimitives.WriteUInt32BigEndian(buffer.AsSpan(0, 4), packet.ConnectionId);
@@ -205,8 +207,13 @@ namespace DProxyClient
             return new DProxyEncryptedData(connectionId, iv, ciphertext, authenticationTag);
         }
 
-        public static async Task SendEncryptedData(NetworkStream stream, uint connectionId, byte[] iv, byte[] ciphertext, byte[] authenticationTag)
-        {
+        public static async Task SendEncryptedData(
+            NetworkStream stream,
+            uint connectionId,
+            byte[] iv,
+            byte[] ciphertext,
+            byte[] authenticationTag
+        ) {
             var packet = new DProxyEncryptedData(connectionId, iv, ciphertext, authenticationTag);
             var buffer = new byte[packet.Length];
             BinaryPrimitives.WriteUInt32BigEndian(buffer.AsSpan(0, 4), packet.ConnectionId);
@@ -236,8 +243,10 @@ namespace DProxyClient
             await stream.WriteAsync(SerializePacket(packet, buffer), CancellationToken.None);
         }
 
-        public static async Task<DProxyHeartbeatResponse> ReadHeartbeatResponse(NetworkStream stream, DProxyHeader header)
-        {
+        public static async Task<DProxyHeartbeatResponse> ReadHeartbeatResponse(
+            NetworkStream stream,
+            DProxyHeader header
+        ) {
             var timestampSenderBuffer = new byte[8];
             await stream.ReadExactlyAsync(timestampSenderBuffer, CancellationToken.None);
             var timestampSender = BinaryPrimitives.ReadUInt64BigEndian(timestampSenderBuffer);
@@ -250,8 +259,11 @@ namespace DProxyClient
             return new DProxyHeartbeatResponse(timestampSender, timestampReceiver);
         }
 
-        public static async Task SendHeartbeatResponse(NetworkStream stream, ulong timestampSender, ulong timestampReceiver)
-        {
+        public static async Task SendHeartbeatResponse(
+            NetworkStream stream,
+            ulong timestampSender,
+            ulong timestampReceiver
+        ) {
             var packet = new DProxyHeartbeatResponse(timestampSender, timestampReceiver);
             var buffer = new byte[packet.Length];
             BinaryPrimitives.WriteUInt64BigEndian(buffer.AsSpan(0, 8), packet.TimestampSender);
