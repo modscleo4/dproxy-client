@@ -11,20 +11,24 @@ env:
 jobs:
   build:
     name: build-${{ matrix.target }}-${{ matrix.arch }}
-    runs-on: ${{ matrix.os }}${{ matrix.suffix }}
+    runs-on: ${{ matrix.os }}
     strategy:
       matrix:
         arch: ['x64', 'arm64']
-        os: [ ubuntu-latest, windows-latest ]
+        target: ['win', 'linux']
         include:
           - arch: 'x64'
-            suffix: ''
-          - arch: 'arm64'
-            suffix: '-arm'
-          - os: 'windows-latest'
-            target: 'win'
-          - os: 'ubuntu-latest'
             target: 'linux'
+            os: 'ubuntu-latest'
+          - arch: 'arm64'
+            target: 'linux'
+            os: 'ubuntu-24.04-arm'
+          - arch: 'x64'
+            target: 'win'
+            os: 'windows-latest'
+          - arch: 'arm64'
+            target: 'win'
+            os: 'windows-11-arm'
 
     steps:
       - uses: actions/checkout@v4
