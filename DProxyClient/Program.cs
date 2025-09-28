@@ -119,7 +119,7 @@ namespace DProxyClient
 
                 if (!EncryptData) {
                     // Send the data to the server.
-                    Logger.LogDebug("Sending {Bytes} bytes of data to the server...", bytesRead);
+                    Logger.LogTrace("Sending {Bytes} bytes of data to the server...", bytesRead);
                     await Client.SendData(stream, connectionId, buffer.AsSpan(0, bytesRead).ToArray());
                     return true;
                 }
@@ -132,7 +132,7 @@ namespace DProxyClient
                 cipher.Encrypt(iv, buffer.AsSpan(0, bytesRead), cipherText, authTag);
 
                 // Send the data to the server.
-                Logger.LogDebug("Sending {Bytes} bytes of data to the server...", bytesRead);
+                Logger.LogTrace("Sending {Bytes} bytes of data to the server...", bytesRead);
                 await Client.SendEncryptedData(stream, connectionId, iv, cipherText, authTag);
 
                 return true;
@@ -257,7 +257,7 @@ namespace DProxyClient
                     if (Connections.TryGetValue(packet.ConnectionId, out var client)) {
                         try {
                             // Send the data to the TCP endpoint.
-                            Logger.LogDebug("Sending {Bytes} bytes of data to {RemoteEndPoint}...", packet.Data.Length, client.Client.RemoteEndPoint);
+                            Logger.LogTrace("Sending {Bytes} bytes of data to {RemoteEndPoint}...", packet.Data.Length, client.Client.RemoteEndPoint);
                             await client.GetStream().WriteAsync(packet.Data, CancellationToken.None);
                         } catch (Exception e) when (e is SocketException or IOException or InvalidOperationException) {
                             Logger.LogError(e, "Failed to relay data to the TCP endpoint.");
@@ -278,7 +278,7 @@ namespace DProxyClient
                             var buffer = ConnectionWriteBuffer[packet.ConnectionId];
 
                             // Decrypt the data with the shared secret.
-                            Logger.LogDebug("Decrypting {Bytes} bytes of data...", packet.Ciphertext.Length);
+                            Logger.LogTrace("Decrypting {Bytes} bytes of data...", packet.Ciphertext.Length);
                             var cipher = new AesGcm(cek, 16);
                             cipher.Decrypt(
                                 packet.IV,
@@ -288,7 +288,7 @@ namespace DProxyClient
                             );
 
                             // Send the data to the TCP endpoint.
-                            Logger.LogDebug("Sending {Bytes} bytes of data to {RemoteEndPoint}...", packet.Ciphertext.Length, client.Client.RemoteEndPoint);
+                            Logger.LogTrace("Sending {Bytes} bytes of data to {RemoteEndPoint}...", packet.Ciphertext.Length, client.Client.RemoteEndPoint);
                             await client.GetStream().WriteAsync(buffer.AsMemory(0, packet.Ciphertext.Length), CancellationToken.None);
                         } catch (AuthenticationTagMismatchException e) {
                             Logger.LogError(e, "Failed to decrypt data from the DProxy Server.");
