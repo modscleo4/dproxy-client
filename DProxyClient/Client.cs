@@ -37,10 +37,12 @@ namespace DProxyClient
         public static async Task StartHandshake(NetworkStream stream, ECDiffieHellman clientKey)
         {
             var clientPublicKey = clientKey.PublicKey.ExportSubjectPublicKeyInfo();
-            var packet          = new DProxyHandshakeInit(clientPublicKey);
+            var packet          = new DProxyHandshakeInit(clientPublicKey, "DProxyClient.net");
             var buffer          = new byte[packet.Length];
             BinaryPrimitives.WriteUInt16BigEndian(buffer.AsSpan(0, 2), (ushort)packet.DERPublicKey.Length);
             packet.DERPublicKey.CopyTo(buffer.AsSpan(2, packet.DERPublicKey.Length));
+            BinaryPrimitives.WriteUInt16BigEndian(buffer.AsSpan(2 + packet.DERPublicKey.Length, 2), (ushort)Encoding.UTF8.GetByteCount(packet.Hello));
+            Encoding.UTF8.GetBytes(packet.Hello).CopyTo(buffer.AsSpan(2 + packet.DERPublicKey.Length + 2, Encoding.UTF8.GetByteCount(packet.Hello)));
 
             await stream.WriteAsync(SerializePacket(packet, buffer), CancellationToken.None);
         }
@@ -126,13 +128,14 @@ namespace DProxyClient
             return new DProxyConnect(connectionId, Encoding.UTF8.GetString(destination), port);
         }
 
-        public static async Task SendConnected(NetworkStream stream, uint connectionId, string endpoint)
+        public static async Task SendConnected(NetworkStream stream, uint connectionId, string endpoint, ushort port)
         {
-            var packet = new DProxyConnected(connectionId, endpoint);
+            var packet = new DProxyConnected(connectionId, endpoint, port);
             var buffer = new byte[packet.Length];
             BinaryPrimitives.WriteUInt32BigEndian(buffer.AsSpan(0, 4), packet.ConnectionId);
-            BinaryPrimitives.WriteUInt16BigEndian(buffer.AsSpan(4, 2), (ushort)packet.Endpoint.Length);
-            Encoding.UTF8.GetBytes(packet.Endpoint).CopyTo(buffer.AsSpan(6, packet.Endpoint.Length));
+            BinaryPrimitives.WriteUInt16BigEndian(buffer.AsSpan(4, 2), (ushort)Encoding.UTF8.GetByteCount(packet.Endpoint));
+            Encoding.UTF8.GetBytes(packet.Endpoint).CopyTo(buffer.AsSpan(6, Encoding.UTF8.GetByteCount(packet.Endpoint)));
+            BinaryPrimitives.WriteUInt16BigEndian(buffer.AsSpan(6 + Encoding.UTF8.GetByteCount(packet.Endpoint), 2), packet.Port);
 
             await stream.WriteAsync(SerializePacket(packet, buffer), CancellationToken.None);
         }
@@ -217,10 +220,10 @@ namespace DProxyClient
             var packet = new DProxyEncryptedData(connectionId, iv, ciphertext, authenticationTag);
             var buffer = new byte[packet.Length];
             BinaryPrimitives.WriteUInt32BigEndian(buffer.AsSpan(0, 4), packet.ConnectionId);
-            iv.CopyTo(buffer.AsSpan(4, 12));
-            BinaryPrimitives.WriteUInt16BigEndian(buffer.AsSpan(16, 2), (ushort)packet.Ciphertext.Length);
-            ciphertext.CopyTo(buffer.AsSpan(18, packet.Ciphertext.Length));
-            authenticationTag.CopyTo(buffer.AsSpan(18 + packet.Ciphertext.Length, 16));
+            iv.CopyTo(buffer.AsSpan(4, packet.IV.Length));
+            BinaryPrimitives.WriteUInt16BigEndian(buffer.AsSpan(4 + packet.IV.Length, 2), (ushort)packet.Ciphertext.Length);
+            packet.Ciphertext.CopyTo(buffer.AsSpan(4 + packet.IV.Length + 2, packet.Ciphertext.Length));
+            packet.AuthenticationTag.CopyTo(buffer.AsSpan(4 + packet.IV.Length + 2 + packet.Ciphertext.Length, packet.AuthenticationTag.Length));
 
             await stream.WriteAsync(SerializePacket(packet, buffer), CancellationToken.None);
         }
@@ -288,8 +291,8 @@ namespace DProxyClient
         {
             var packet = new DProxyErrorPacket(errorCode, message);
             var buffer = new byte[packet.Length];
-            BinaryPrimitives.WriteUInt16BigEndian(buffer.AsSpan(0, 2), (ushort)message.Length);
-            Encoding.UTF8.GetBytes(message).CopyTo(buffer.AsSpan(2, message.Length));
+            BinaryPrimitives.WriteUInt16BigEndian(buffer.AsSpan(0, 2), (ushort)Encoding.UTF8.GetByteCount(packet.Message));
+            Encoding.UTF8.GetBytes(packet.Message).CopyTo(buffer.AsSpan(2, Encoding.UTF8.GetByteCount(packet.Message)));
 
             await stream.WriteAsync(SerializePacket(packet, buffer), CancellationToken.None);
         }

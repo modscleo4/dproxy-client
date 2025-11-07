@@ -31,6 +31,14 @@ namespace DProxyClient
         }
     }
 
+    internal static class IPAddressExtensions
+    {
+        public static string ToStringUnmasked(this IPAddress address)
+        {
+            return address.IsIPv4MappedToIPv6 ? address.MapToIPv4().ToString() : address.ToString();
+        }
+    }
+
     internal static class Program
     {
         private static readonly string ServerAddress = Assembly.GetExecutingAssembly().GetCustomAttribute<ServerAddressAttribute>()?.Value ?? "localhost";
@@ -114,7 +122,10 @@ namespace DProxyClient
             try {
                 var bytesRead = await client.GetStream().ReadAsync(buffer, CancellationToken.None);
                 if (bytesRead == 0) {
-                    return true;
+                    // The method returns zero (0) only if
+                    //   zero bytes were requested
+                    //   or if no more bytes are available because the peer socket performed a graceful shutdown.
+                    return false;
                 }
 
                 if (!EncryptData) {
@@ -181,12 +192,13 @@ namespace DProxyClient
                             client.NoDelay = true;
                             client.SendBufferSize = 2 << 14;
                             client.ReceiveBufferSize = 2 << 14;
-                            var bndAddr = ((IPEndPoint?)client.Client.LocalEndPoint)?.Address?.ToString() ?? "0.0.0.0";
+                            var bndAddr = ((IPEndPoint?)client.Client.LocalEndPoint)?.Address?.ToStringUnmasked() ?? "0.0.0.0";
+                            var bndPort = ((IPEndPoint?)client.Client.LocalEndPoint)?.Port ?? 0;
 
                             Connections[packet.ConnectionId]           = client;
                             ConnectionReadBuffer[packet.ConnectionId]  = new byte[2 << 14];
                             ConnectionWriteBuffer[packet.ConnectionId] = new byte[2 << 14];
-                            await Client.SendConnected(stream, packet.ConnectionId, bndAddr);
+                            await Client.SendConnected(stream, packet.ConnectionId, bndAddr, (ushort)bndPort);
 
                             while (true) {
                                 if (!stream.Socket.Connected) {

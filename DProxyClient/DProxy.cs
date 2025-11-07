@@ -12,6 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+using System.Text;
+
 namespace DProxyClient
 {
     public enum DProxyPacketType : byte
@@ -51,17 +53,17 @@ namespace DProxyClient
     [Serializable()]
     public record DProxyHeader(byte Version, DProxyPacketType Type, ushort Length, DProxyError ErrorCode);
 
-    public record DProxyHandshakeInit(byte[] DERPublicKey) : DProxyHeader(1, DProxyPacketType.HANDSHAKE_INIT, (ushort)(2 + DERPublicKey.Length), DProxyError.NO_ERROR);
+    public record DProxyHandshakeInit(byte[] DERPublicKey, string Hello) : DProxyHeader(1, DProxyPacketType.HANDSHAKE_INIT, (ushort)(2 + DERPublicKey.Length + 2 + Encoding.UTF8.GetByteCount(Hello)), DProxyError.NO_ERROR);
 
     public record DProxyHandshakeResponse(byte[] IV, byte[] Ciphertext, byte[] AuthenticationTag) : DProxyHeader(1, DProxyPacketType.HANDSHAKE_RESPONSE, (ushort)(IV.Length + 2 + Ciphertext.Length + AuthenticationTag.Length), DProxyError.NO_ERROR);
 
     public record DProxyHandshakeFinal(byte[] Plaintext) : DProxyHeader(1, DProxyPacketType.HANDSHAKE_FINAL, (ushort)(2 + Plaintext.Length), DProxyError.NO_ERROR);
 
-    public record DProxyHandshakeFinalized(string Id) : DProxyHeader(1, DProxyPacketType.HANDSHAKE_FINALIZED, (ushort)(2 + Id.Length), DProxyError.NO_ERROR);
+    public record DProxyHandshakeFinalized(string Id) : DProxyHeader(1, DProxyPacketType.HANDSHAKE_FINALIZED, (ushort)(2 + Encoding.UTF8.GetByteCount(Id)), DProxyError.NO_ERROR);
 
-    public record DProxyConnect(uint ConnectionId, string Destination, ushort Port) : DProxyHeader(1, DProxyPacketType.CONNECT, (ushort)(4 + 2 + Destination.Length + 2), DProxyError.NO_ERROR);
+    public record DProxyConnect(uint ConnectionId, string Destination, ushort Port) : DProxyHeader(1, DProxyPacketType.CONNECT, (ushort)(4 + 2 + Encoding.UTF8.GetByteCount(Destination) + 2), DProxyError.NO_ERROR);
 
-    public record DProxyConnected(uint ConnectionId, string Endpoint) : DProxyHeader(1, DProxyPacketType.CONNECTED, (ushort)(4 + 2 + Endpoint.Length), DProxyError.NO_ERROR);
+    public record DProxyConnected(uint ConnectionId, string Endpoint, ushort Port) : DProxyHeader(1, DProxyPacketType.CONNECTED, (ushort)(4 + 2 + Encoding.UTF8.GetByteCount(Endpoint) + 2), DProxyError.NO_ERROR);
 
     public record DProxyDisconnect(uint ConnectionId) : DProxyHeader(1, DProxyPacketType.DISCONNECT, 4, DProxyError.NO_ERROR);
 
@@ -75,5 +77,5 @@ namespace DProxyClient
 
     public record DProxyHeartbeatResponse(ulong TimestampSender, ulong TimestampReceiver) : DProxyHeader(1, DProxyPacketType.HEARTBEAT_RESPONSE, 8 + 8, DProxyError.NO_ERROR);
 
-    public record DProxyErrorPacket(DProxyError ErrorCode, string Message) : DProxyHeader(1, DProxyPacketType.ERROR, (ushort)(2 + Message.Length), ErrorCode);
+    public record DProxyErrorPacket(DProxyError ErrorCode, string Message) : DProxyHeader(1, DProxyPacketType.ERROR, (ushort)(2 + Encoding.UTF8.GetByteCount(Message)), ErrorCode);
 }
