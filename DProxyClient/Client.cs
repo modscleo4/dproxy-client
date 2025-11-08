@@ -34,10 +34,10 @@ namespace DProxyClient
             return buffer;
         }
 
-        public static async Task StartHandshake(NetworkStream stream, ECDiffieHellman clientKey)
+        public static async Task StartHandshake(NetworkStream stream, ECDiffieHellman clientKey, string version)
         {
             var clientPublicKey = clientKey.PublicKey.ExportSubjectPublicKeyInfo();
-            var packet          = new DProxyHandshakeInit(clientPublicKey, "DProxyClient.net");
+            var packet          = new DProxyHandshakeInit(clientPublicKey, $"DProxyClient.net#{version}");
             var buffer          = new byte[packet.Length];
             BinaryPrimitives.WriteUInt16BigEndian(buffer.AsSpan(0, 2), (ushort)packet.DERPublicKey.Length);
             packet.DERPublicKey.CopyTo(buffer.AsSpan(2, packet.DERPublicKey.Length));

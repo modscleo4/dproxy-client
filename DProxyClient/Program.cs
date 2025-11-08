@@ -46,6 +46,7 @@ namespace DProxyClient
     internal static class Program
     {
         private static readonly string ServerAddress = Assembly.GetExecutingAssembly().GetCustomAttribute<ServerAddressAttribute>()?.Value ?? "localhost";
+        private static readonly string Version = Assembly.GetExecutingAssembly().GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion ?? "0.1.0-dev";
 
         private static readonly string ConfigPath = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "DProxy");
 
@@ -395,7 +396,7 @@ namespace DProxyClient
 
                 // Start the handshake
                 // Send the public key to the server.
-                await Client.StartHandshake(stream, clientKey);
+                await Client.StartHandshake(stream, clientKey, Version);
 
                 // Process the response from the server.
                 var handshakeResponseHeader = await Client.GetPacketHeader(stream, TimeSpan.FromSeconds(30));
