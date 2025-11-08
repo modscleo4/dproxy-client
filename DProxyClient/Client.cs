@@ -114,6 +114,10 @@ namespace DProxyClient
             await stream.ReadExactlyAsync(connectionIdBuffer, CancellationToken.None);
             var connectionId = BinaryPrimitives.ReadUInt32BigEndian(connectionIdBuffer);
 
+            var connectionTypeBuffer = new byte[1];
+            await stream.ReadExactlyAsync(connectionTypeBuffer, CancellationToken.None);
+            var connectionType = (DProxyConnectionType)connectionTypeBuffer[0];
+
             var destinationLengthBuffer = new byte[2];
             await stream.ReadExactlyAsync(destinationLengthBuffer, CancellationToken.None);
             var destinationLength = BinaryPrimitives.ReadUInt16BigEndian(destinationLengthBuffer);
@@ -125,7 +129,7 @@ namespace DProxyClient
             await stream.ReadExactlyAsync(portBuffer, CancellationToken.None);
             var port = BinaryPrimitives.ReadUInt16BigEndian(portBuffer);
 
-            return new DProxyConnect(connectionId, Encoding.UTF8.GetString(destination), port);
+            return new DProxyConnect(connectionId, connectionType, Encoding.UTF8.GetString(destination), port);
         }
 
         public static async Task SendConnected(NetworkStream stream, uint connectionId, string endpoint, ushort port)

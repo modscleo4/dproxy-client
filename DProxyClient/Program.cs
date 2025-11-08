@@ -33,9 +33,13 @@ namespace DProxyClient
 
     internal static class IPAddressExtensions
     {
-        public static string ToStringUnmasked(this IPAddress address)
+        public static string ToStringFormatted(this IPAddress address)
         {
-            return address.IsIPv4MappedToIPv6 ? address.MapToIPv4().ToString() : address.ToString();
+            if (address.IsIPv4MappedToIPv6) {
+                return address.MapToIPv4().ToString();
+            }
+
+            return address.AddressFamily == AddressFamily.InterNetworkV6 ? $"[{address}]" : address.ToString();
         }
     }
 
@@ -54,7 +58,7 @@ namespace DProxyClient
         /**
          * ConnectionID -> TCP Connection Map
          */
-        private static readonly ConcurrentDictionary<uint, TcpClient> Connections = [];
+        private static readonly ConcurrentDictionary<uint, Socket> Connections = [];
         private static readonly ConcurrentDictionary<uint, Task> ConnectionTasks = [];
         private static readonly ConcurrentDictionary<uint, byte[]> ConnectionReadBuffer = [];
         private static readonly ConcurrentDictionary<uint, byte[]> ConnectionWriteBuffer = [];
@@ -113,14 +117,14 @@ namespace DProxyClient
         /// <param name="stream">The server's network stream.</param>
         /// <param name="cipher">The cipher used to encrypt/decrypt the data.</param>
         /// <param name="connectionId">The connection ID.</param>
-        /// <param name="client">The connected TCP Socket.</param>
+        /// <param name="socket">The connected TCP Socket.</param>
         /// <returns>Whether the TCP Socket is still connected or not.</returns>
-        private static async Task<bool> ReadConnectedSocket(NetworkStream stream, AesGcm cipher, uint connectionId, TcpClient client)
+        private static async Task<bool> ReadConnectedSocket(NetworkStream stream, AesGcm cipher, uint connectionId, Socket socket)
         {
             var buffer = ConnectionReadBuffer[connectionId];
 
             try {
-                var bytesRead = await client.GetStream().ReadAsync(buffer, CancellationToken.None);
+                var bytesRead = await socket.ReceiveAsync(buffer, CancellationToken.None);
                 if (bytesRead == 0) {
                     // The method returns zero (0) only if
                     //   zero bytes were requested
@@ -181,21 +185,23 @@ namespace DProxyClient
                         var cipher = new AesGcm(cek, 16);
 
                         try {
+                            Logger.LogDebug("[{Type}] Connecting {ConnectionId} to {Destination}:{Port}...", packet.ConnectionType, packet.ConnectionId, packet.Destination, packet.Port);
                             using var cts = new CancellationTokenSource();
                             cts.CancelAfter(1000);
 
-                            var client = new TcpClient();
+                            using var client = new TcpClient();
 
-                            Logger.LogDebug("Connecting {ConnectionId} to {Destination}:{Port}...", packet.ConnectionId, packet.Destination, packet.Port);
                             await client.ConnectAsync(packet.Destination, packet.Port, cts.Token);
-                            Logger.LogInformation("Connected {ConnectionId} to {Destination}:{Port}.", packet.ConnectionId, packet.Destination, packet.Port);
+                            Logger.LogInformation("[{Type}] Connected {ConnectionId} to {Destination}:{Port}.", packet.ConnectionType, packet.ConnectionId, packet.Destination, packet.Port);
                             client.NoDelay = true;
                             client.SendBufferSize = 2 << 14;
                             client.ReceiveBufferSize = 2 << 14;
-                            var bndAddr = ((IPEndPoint?)client.Client.LocalEndPoint)?.Address?.ToStringUnmasked() ?? "0.0.0.0";
-                            var bndPort = ((IPEndPoint?)client.Client.LocalEndPoint)?.Port ?? 0;
 
-                            Connections[packet.ConnectionId]           = client;
+                            var socket = client.Client;
+                            var bndAddr = ((IPEndPoint?)socket.LocalEndPoint)?.Address?.ToStringFormatted() ?? "0.0.0.0";
+                            var bndPort = ((IPEndPoint?)socket.LocalEndPoint)?.Port ?? 0;
+
+                            Connections[packet.ConnectionId]           = socket;
                             ConnectionReadBuffer[packet.ConnectionId]  = new byte[2 << 14];
                             ConnectionWriteBuffer[packet.ConnectionId] = new byte[2 << 14];
                             await Client.SendConnected(stream, packet.ConnectionId, bndAddr, (ushort)bndPort);
@@ -205,11 +211,11 @@ namespace DProxyClient
                                     break;
                                 }
 
-                                if (!client.Connected) {
+                                if (!socket.Connected) {
                                     break;
                                 }
 
-                                if (!await ReadConnectedSocket(stream, cipher, packet.ConnectionId, client)) {
+                                if (!await ReadConnectedSocket(stream, cipher, packet.ConnectionId, socket)) {
                                     break;
                                 }
 
@@ -217,7 +223,6 @@ namespace DProxyClient
                             }
 
                             Logger.LogDebug("Connection {ConnectionId} terminated.", packet.ConnectionId);
-                            client.Close();
                         } catch (SocketException e) {
                             Logger.LogError(e, "Failed to connect to {Destination}:{Port}.", packet.Destination, packet.Port);
                             await Client.SendDisconnected(stream, packet.ConnectionId, DProxyError.CONNECTION_FAILED);
@@ -242,10 +247,10 @@ namespace DProxyClient
                 case DProxyPacketType.DISCONNECT: {
                     var packet = await Client.ReadDisconnect(stream, header);
 
-                    if (Connections.TryGetValue(packet.ConnectionId, out var client)) {
+                    if (Connections.TryGetValue(packet.ConnectionId, out var socket)) {
                         try {
-                            Logger.LogInformation("Disconnecting from {Address}...", client.Client.RemoteEndPoint);
-                            client.Close();
+                            Logger.LogInformation("Disconnecting from {Address}...", socket.RemoteEndPoint);
+                            socket.Close();
                         } catch (SocketException) {
                             //
                         }
@@ -266,11 +271,11 @@ namespace DProxyClient
                 case DProxyPacketType.DATA: {
                     var packet = await Client.ReadData(stream, header);
 
-                    if (Connections.TryGetValue(packet.ConnectionId, out var client)) {
+                    if (Connections.TryGetValue(packet.ConnectionId, out var socket)) {
                         try {
                             // Send the data to the TCP endpoint.
-                            Logger.LogTrace("Sending {Bytes} bytes of data to {RemoteEndPoint}...", packet.Data.Length, client.Client.RemoteEndPoint);
-                            await client.GetStream().WriteAsync(packet.Data, CancellationToken.None);
+                            Logger.LogTrace("Sending {Bytes} bytes of data to {RemoteEndPoint}...", packet.Data.Length, socket.RemoteEndPoint);
+                            await socket.SendAsync(packet.Data, CancellationToken.None);
                         } catch (Exception e) when (e is SocketException or IOException or InvalidOperationException) {
                             Logger.LogError(e, "Failed to relay data to the TCP endpoint.");
                             await Client.SendError(stream, DProxyError.CONNECTION_CLOSED);
@@ -285,7 +290,7 @@ namespace DProxyClient
                 case DProxyPacketType.ENCRYPTED_DATA: {
                     var packet = await Client.ReadEncryptedData(stream, header);
 
-                    if (Connections.TryGetValue(packet.ConnectionId, out var client)) {
+                    if (Connections.TryGetValue(packet.ConnectionId, out var socket)) {
                         try {
                             var buffer = ConnectionWriteBuffer[packet.ConnectionId];
 
@@ -300,8 +305,8 @@ namespace DProxyClient
                             );
 
                             // Send the data to the TCP endpoint.
-                            Logger.LogTrace("Sending {Bytes} bytes of data to {RemoteEndPoint}...", packet.Ciphertext.Length, client.Client.RemoteEndPoint);
-                            await client.GetStream().WriteAsync(buffer.AsMemory(0, packet.Ciphertext.Length), CancellationToken.None);
+                            Logger.LogTrace("Sending {Bytes} bytes of data to {RemoteEndPoint}...", packet.Ciphertext.Length, socket.RemoteEndPoint);
+                            await socket.SendAsync(buffer.AsMemory(0, packet.Ciphertext.Length), CancellationToken.None);
                         } catch (AuthenticationTagMismatchException e) {
                             Logger.LogError(e, "Failed to decrypt data from the DProxy Server.");
                             await Client.SendError(stream, DProxyError.DECRYPT_FAILED);
@@ -424,10 +429,6 @@ namespace DProxyClient
 
                 Logger.LogInformation("The handshake was successful.");
                 while (true) {
-                    if (!stream.Socket.Connected) {
-                        throw new SocketException((int)SocketError.NotConnected);
-                    }
-
                     var incomingHeader = await Client.GetPacketHeader(stream, Timeout.InfiniteTimeSpan);
                     await HandleServerPacket(stream, cek, incomingHeader);
                 }

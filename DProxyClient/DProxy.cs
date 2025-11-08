@@ -50,6 +50,12 @@ namespace DProxyClient
         DECRYPT_FAILED,
     }
 
+    public enum DProxyConnectionType : byte
+    {
+        TCP,
+        UDP,
+    }
+
     [Serializable()]
     public record DProxyHeader(byte Version, DProxyPacketType Type, ushort Length, DProxyError ErrorCode);
 
@@ -61,7 +67,7 @@ namespace DProxyClient
 
     public record DProxyHandshakeFinalized(string Id) : DProxyHeader(1, DProxyPacketType.HANDSHAKE_FINALIZED, (ushort)(2 + Encoding.UTF8.GetByteCount(Id)), DProxyError.NO_ERROR);
 
-    public record DProxyConnect(uint ConnectionId, string Destination, ushort Port) : DProxyHeader(1, DProxyPacketType.CONNECT, (ushort)(4 + 2 + Encoding.UTF8.GetByteCount(Destination) + 2), DProxyError.NO_ERROR);
+    public record DProxyConnect(uint ConnectionId, DProxyConnectionType ConnectionType, string Destination, ushort Port) : DProxyHeader(1, DProxyPacketType.CONNECT, (ushort)(4 + 1 + 2 + Encoding.UTF8.GetByteCount(Destination) + 2), DProxyError.NO_ERROR);
 
     public record DProxyConnected(uint ConnectionId, string Endpoint, ushort Port) : DProxyHeader(1, DProxyPacketType.CONNECTED, (ushort)(4 + 2 + Encoding.UTF8.GetByteCount(Endpoint) + 2), DProxyError.NO_ERROR);
 
