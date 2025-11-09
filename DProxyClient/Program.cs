@@ -41,6 +41,82 @@ namespace DProxyClient
 
             return address.AddressFamily == AddressFamily.InterNetworkV6 ? $"[{address}]" : address.ToString();
         }
+
+        public static bool IsPrivate(this IPAddress address)
+        {
+            switch (address.AddressFamily) {
+                case AddressFamily.InterNetwork: {
+                    var bytes = address.GetAddressBytes();
+                    return bytes[0] == 10
+                           || (bytes[0] == 172 && (bytes[1] >= 16 && bytes[1] <= 31))
+                           || (bytes[0] == 192 && bytes[1] == 168);
+                }
+                case AddressFamily.InterNetworkV6: {
+                    var bytes = address.GetAddressBytes();
+                    return ((bytes[0] & 0xFE) == 0xFC); // Unique Local Address (ULA)
+                }
+                default:
+                    return false;
+            }
+        }
+
+        public static bool IsLinkLocal(this IPAddress address)
+        {
+            switch (address.AddressFamily) {
+                case AddressFamily.InterNetwork: {
+                    var bytes = address.GetAddressBytes();
+                    return (bytes[0] == 169 && bytes[1] == 254);
+                }
+                case AddressFamily.InterNetworkV6: {
+                    var bytes = address.GetAddressBytes();
+                    return (bytes[0] == 0xfe && (bytes[1] & 0xc0) == 0x80); // fe80::/10
+                }
+                default:
+                    return false;
+            }
+        }
+
+        public static bool IsMulticast(this IPAddress address)
+        {
+            switch (address.AddressFamily) {
+                case AddressFamily.InterNetwork: {
+                    var bytes = address.GetAddressBytes();
+                    return (bytes[0] >= 224 && bytes[0] <= 239);
+                }
+                case AddressFamily.InterNetworkV6: {
+                    var bytes = address.GetAddressBytes();
+                    return (bytes[0] == 0xff);
+                }
+                default:
+                    return false;
+            }
+        }
+
+        public static bool IsSpecial(this IPAddress address)
+        {
+            switch (address.AddressFamily) {
+                case AddressFamily.InterNetwork: {
+                    var bytes = address.GetAddressBytes();
+                    // 100.64.0.0/10 (CGNAT)
+                    // 192.0.2.0/24 (TEST-NET-1), 198.51.100.0/24 (TEST-NET-2), 203.0.113.0/24 (TEST-NET-3)
+                    // 198.18.0.0/15 (Benchmarking)
+                    // 240.0.0.0/4 (Reserved for Future Use)
+                    return (bytes[0] == 100 && (bytes[1] >= 64 && bytes[1] <= 127))
+                           || (bytes[0] == 192 && bytes[1] == 0 && bytes[2] == 2)
+                           || (bytes[0] == 198 && bytes[1] == 51 && bytes[2] == 100)
+                           || (bytes[0] == 203 && bytes[1] == 0 && bytes[2] == 113)
+                           || (bytes[0] == 198 && (bytes[1] >= 18 && bytes[1] <= 19))
+                           || (bytes[0] >= 240);
+                }
+                case AddressFamily.InterNetworkV6: {
+                    var bytes = address.GetAddressBytes();
+                    // 2001:db8::/32 (Documentation Address)
+                    return (bytes[0] == 0x20 && bytes[1] == 0x01 && bytes[2] == 0x0d && bytes[3] == 0xb8);
+                }
+                default:
+                    return false;
+            }
+        }
     }
 
     internal static class Program
@@ -201,6 +277,22 @@ namespace DProxyClient
                             var socket = client.Client;
                             var bndAddr = ((IPEndPoint?)socket.LocalEndPoint)?.Address?.ToStringFormatted() ?? "0.0.0.0";
                             var bndPort = ((IPEndPoint?)socket.LocalEndPoint)?.Port ?? 0;
+
+                            // Forbid local IP connections
+                            if (
+                                socket.RemoteEndPoint is IPEndPoint remoteEndPoint
+                                && (
+                                    IPAddress.IsLoopback(remoteEndPoint.Address)
+                                    || remoteEndPoint.Address.IsPrivate()
+                                    || remoteEndPoint.Address.IsLinkLocal()
+                                    || remoteEndPoint.Address.IsMulticast()
+                                    || remoteEndPoint.Address.IsSpecial()
+                                )
+                            ) {
+                                Logger.LogWarning("Connection {ConnectionId} to {Destination}:{Port} was blocked (local IP address).", packet.ConnectionId, packet.Destination, packet.Port);
+                                await Client.SendDisconnected(stream, packet.ConnectionId, DProxyError.INVALID_DESTINATION);
+                                return;
+                            }
 
                             Connections[packet.ConnectionId]           = socket;
                             ConnectionReadBuffer[packet.ConnectionId]  = new byte[2 << 14];
