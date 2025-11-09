@@ -42,6 +42,11 @@ namespace DProxyClient
             return address.AddressFamily == AddressFamily.InterNetworkV6 ? $"[{address}]" : address.ToString();
         }
 
+        public static IPAddress GetUnmapped(this IPAddress address)
+        {
+            return address.IsIPv4MappedToIPv6 ? address.MapToIPv4() : address;
+        }
+
         public static bool IsPrivate(this IPAddress address)
         {
             switch (address.AddressFamily) {
@@ -116,6 +121,12 @@ namespace DProxyClient
                 default:
                     return false;
             }
+        }
+
+        public static bool IsNonPublic(this IPAddress address)
+        {
+            address = address.GetUnmapped();
+            return IPAddress.IsLoopback(address) || address.IsPrivate() || address.IsLinkLocal() || address.IsMulticast() || address.IsSpecial();
         }
     }
 
@@ -283,13 +294,7 @@ namespace DProxyClient
                             // Forbid local IP connections
                             if (
                                 socket.RemoteEndPoint is IPEndPoint remoteEndPoint
-                                && (
-                                    IPAddress.IsLoopback(remoteEndPoint.Address)
-                                    || remoteEndPoint.Address.IsPrivate()
-                                    || remoteEndPoint.Address.IsLinkLocal()
-                                    || remoteEndPoint.Address.IsMulticast()
-                                    || remoteEndPoint.Address.IsSpecial()
-                                )
+                                && remoteEndPoint.Address.IsNonPublic()
                             ) {
                                 Logger.LogWarning("Connection {ConnectionId} to {Destination}:{Port} was blocked (local IP address).", packet.ConnectionId, packet.Destination, packet.Port);
                                 await Client.SendDisconnected(stream, packet.ConnectionId, DProxyError.INVALID_DESTINATION);
