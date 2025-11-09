@@ -228,7 +228,7 @@ namespace DProxyClient
                 await Client.SendEncryptedData(stream, connectionId, iv, cipherText, authTag);
 
                 return true;
-            } catch (SocketException e) {
+            } catch (SocketException) {
                 return false;
             } catch (IOException e) {
                 Logger.LogError(e, "Failed to read data from the TCP endpoints.");
@@ -560,7 +560,7 @@ namespace DProxyClient
                 ECDiffieHellman serverKey;
                 ECDiffieHellman clientKey;
 
-                if (!File.Exists(ConfigPath)) {
+                if (!Directory.Exists(ConfigPath)) {
                     Directory.CreateDirectory(ConfigPath);
                 }
 
@@ -594,8 +594,17 @@ namespace DProxyClient
                             // Stop retrying if the server rejected the message.
                             break;
                         }
-                    } catch (Exception e) when (e is SocketException or IOException or AuthenticationTagMismatchException) {
-                        Logger.LogError(e, "Failed to connect to the DProxy Server.");
+                    } catch (AuthenticationTagMismatchException e) {
+                        Logger.LogInformation(e, "Refetching server's public key from Key Exchange Server...");
+                        serverKey = await KeyServer.GetServerPublicKeyFromExchangeServer();
+
+                        // Save the server's public key to the file system.
+                        await File.WriteAllTextAsync(ServerPublicKeyPath, serverKey.ExportSubjectPublicKeyInfoPem());
+
+                        Logger.LogDebug("Waiting 5 seconds before retrying...");
+                        await Task.Delay(5000);
+                    }  catch (Exception e) when (e is SocketException or IOException) {
+                        Logger.LogError(e, "Failed to connect to the DProxy Server. Retrying in 5 seconds...");
 
                         await Task.Delay(5000);
                     }
