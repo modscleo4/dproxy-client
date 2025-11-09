@@ -228,6 +228,8 @@ namespace DProxyClient
                 await Client.SendEncryptedData(stream, connectionId, iv, cipherText, authTag);
 
                 return true;
+            } catch (SocketException e) {
+                return false;
             } catch (IOException e) {
                 Logger.LogError(e, "Failed to read data from the TCP endpoints.");
                 return true;
@@ -316,6 +318,7 @@ namespace DProxyClient
                             }
 
                             Logger.LogDebug("Connection {ConnectionId} terminated.", packet.ConnectionId);
+                            await Client.SendDisconnected(stream, packet.ConnectionId);
                         } catch (SocketException e) {
                             Logger.LogError(e, "Failed to connect to {Destination}:{Port}.", packet.Destination, packet.Port);
                             await Client.SendDisconnected(stream, packet.ConnectionId, DProxyError.CONNECTION_FAILED);
@@ -324,12 +327,12 @@ namespace DProxyClient
                             await Client.SendDisconnected(stream, packet.ConnectionId, DProxyError.CONNECTION_TIMEOUT);
                         } catch (Exception e) {
                             Logger.LogError(e, "Failed to connect to {Destination}:{Port}.", packet.Destination, packet.Port);
+                            await Client.SendDisconnected(stream, packet.ConnectionId);
                         } finally {
                             Connections.Remove(packet.ConnectionId, out var _);
                             ConnectionTasks.Remove(packet.ConnectionId, out var _);
                             ConnectionReadBuffer.Remove(packet.ConnectionId, out var _);
                             ConnectionWriteBuffer.Remove(packet.ConnectionId, out var _);
-                            await Client.SendDisconnected(stream, packet.ConnectionId);
                         }
                     };
 
