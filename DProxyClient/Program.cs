@@ -261,7 +261,7 @@ namespace DProxyClient
                     }
 
                     var task = async () => {
-                        var cipher = new AesGcm(cek, 16);
+                        using var cipher = new AesGcm(cek, 16);
 
                         try {
                             Logger.LogDebug("[{Type}] Connecting {ConnectionId} to {Destination}:{Port}...", packet.ConnectionType, packet.ConnectionId, packet.Destination, packet.Port);
@@ -329,10 +329,10 @@ namespace DProxyClient
                             Logger.LogError(e, "Failed to connect to {Destination}:{Port}.", packet.Destination, packet.Port);
                             await Client.SendDisconnected(stream, packet.ConnectionId);
                         } finally {
-                            Connections.Remove(packet.ConnectionId, out var _);
-                            ConnectionTasks.Remove(packet.ConnectionId, out var _);
-                            ConnectionReadBuffer.Remove(packet.ConnectionId, out var _);
-                            ConnectionWriteBuffer.Remove(packet.ConnectionId, out var _);
+                            Connections.TryRemove(packet.ConnectionId, out var _);
+                            ConnectionTasks.TryRemove(packet.ConnectionId, out var _);
+                            ConnectionReadBuffer.TryRemove(packet.ConnectionId, out var _);
+                            ConnectionWriteBuffer.TryRemove(packet.ConnectionId, out var _);
                         }
                     };
 
@@ -392,7 +392,7 @@ namespace DProxyClient
 
                             // Decrypt the data with the shared secret.
                             Logger.LogTrace("Decrypting {Bytes} bytes of data...", packet.Ciphertext.Length);
-                            var cipher = new AesGcm(cek, 16);
+                            using var cipher = new AesGcm(cek, 16);
                             cipher.Decrypt(
                                 packet.IV,
                                 packet.Ciphertext,
@@ -506,7 +506,7 @@ namespace DProxyClient
                 Logger.LogDebug("Authentication Tag: {AuthenticationTag}", Convert.ToHexString(handshakeResponse.AuthenticationTag));
 
                 // Decrypt the cipher text with the shared secret.
-                var cipher    = new AesGcm(cek, 16);
+                using var cipher    = new AesGcm(cek, 16);
                 var plainText = new byte[handshakeResponse.Ciphertext.Length];
                 cipher.Decrypt(handshakeResponse.IV, handshakeResponse.Ciphertext, handshakeResponse.AuthenticationTag, plainText);
                 Logger.LogDebug("Plain Text: {PlainText}", Convert.ToHexString(plainText));
