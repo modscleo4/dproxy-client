@@ -163,7 +163,8 @@ internal static class Program
                 }
 
                 var task = async () => {
-                    using var cipher = new AesGcm(cek, 16);
+                    // There's a random bug when using context manager that makes the entire connectionId send invalid packets to the server.
+                    var cipher = new AesGcm(cek, 16);
 
                     try {
                         Logger.LogDebug("[{Type}] Connecting {ConnectionId} to {Destination}:{Port}...", packet.ConnectionType, packet.ConnectionId, packet.Destination, packet.Port);
@@ -243,7 +244,7 @@ internal static class Program
                     try {
                         Logger.LogInformation("Disconnecting from {Address}...", socket.RemoteEndPoint);
                         socket.Close();
-                    } catch (SocketException) {
+                    } catch (Exception e) when (e is SocketException or ObjectDisposedException) {
                         //
                     }
 
@@ -288,7 +289,7 @@ internal static class Program
 
                         // Decrypt the data with the shared secret.
                         Logger.LogTrace("Decrypting {Bytes} bytes of data...", packet.Ciphertext.Length);
-                        using var cipher = new AesGcm(cek, 16);
+                        var cipher = new AesGcm(cek, 16);
                         cipher.Decrypt(
                             packet.IV,
                             packet.Ciphertext,
@@ -402,8 +403,8 @@ internal static class Program
             Logger.LogDebug("Authentication Tag: {AuthenticationTag}", Convert.ToHexString(handshakeResponse.AuthenticationTag));
 
             // Decrypt the cipher text with the shared secret.
-            using var cipher    = new AesGcm(cek, 16);
-            var       plainText = new byte[handshakeResponse.Ciphertext.Length];
+            var cipher    = new AesGcm(cek, 16);
+            var plainText = new byte[handshakeResponse.Ciphertext.Length];
             cipher.Decrypt(handshakeResponse.IV, handshakeResponse.Ciphertext, handshakeResponse.AuthenticationTag, plainText);
             Logger.LogDebug("Plain Text: {PlainText}", Convert.ToHexString(plainText));
 
