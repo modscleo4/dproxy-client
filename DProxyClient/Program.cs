@@ -14,6 +14,7 @@
 
 using System.Collections.Concurrent;
 using System.Net;
+using System.Net.NetworkInformation;
 using System.Net.Sockets;
 using System.Reflection;
 using System.Security.Cryptography;
@@ -362,6 +363,15 @@ internal static class Program
 
         var socket = new TcpClient();
 
+        NetworkAvailabilityChangedEventHandler ev = (sender, e) => {
+            if (!e.IsAvailable) {
+                Logger.LogWarning("Network connection lost. Closing the socket...");
+                socket.Close();
+            }
+        };
+
+        NetworkChange.NetworkAvailabilityChanged += ev;
+
         foreach (var connection in Connections) {
             Logger.LogInformation("Closing connection {ConnectionId}...", connection.Key);
             connection.Value.Close();
@@ -426,6 +436,8 @@ internal static class Program
                 await HandleServerPacket(stream, cek, incomingHeader);
             }
         } finally {
+            NetworkChange.NetworkAvailabilityChanged -= ev;
+
             // Close all the TCP connections when the thread is terminated.
             foreach (var connection in Connections) {
                 connection.Value.Close();
